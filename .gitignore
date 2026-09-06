@@ -87,3 +87,8 @@ npm-debug.log*
 
 .claude/
 CLAUDE.md
+
+# ── Local agent / ops notes (personal VPS details — do not commit) ───────────
+AGENTS.md
+AGENTS.local.md
+
