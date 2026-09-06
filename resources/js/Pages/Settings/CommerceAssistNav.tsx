@@ -3,6 +3,7 @@ import { Link } from '@inertiajs/react';
 
 const links = [
     { href: '/settings/commerce-assist', label: 'Settings', exact: true },
+    { href: '/settings/commerce-assist/learn', label: 'Learn from history' },
     { href: '/settings/commerce-assist/facts', label: 'Current facts' },
     { href: '/settings/commerce-assist/intents', label: 'Intent rules' },
     { href: '/settings/commerce-assist/examples', label: 'Approved replies' },

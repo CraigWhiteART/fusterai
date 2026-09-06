@@ -15,8 +15,11 @@ Fuster remains the helpdesk. This module adds:
 9. Confidence / human-required flags (draft-only by default)
 10. Source visibility on the conversation
 11. Historical ticket replay
+12. Learn from sent history — scan already-sent agent emails and review proposed knowledge, current facts, and approved replies
 
 Live facts: while reviewing a draft, type what is true now (stock, dates, timelines). Related unsent drafts are rewritten. Current facts override older knowledge base articles. Nothing is sent to customers.
+
+Starting from scratch: **Settings → Commerce Assist → Learn from history**. It reads sent agent replies, proposes knowledge articles, current facts, and approved replies, and waits for you to accept or skip. Order numbers and emails are stripped from knowledge and facts.
 
 It does **not** edit Shopify orders, issue refunds, auto-send, or fine-tune a model.
 

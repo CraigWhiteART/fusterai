@@ -1,6 +1,7 @@
 <?php
 
 use App\Domains\AI\Jobs\GenerateReplySuggestionJob;
+use App\Domains\AI\Jobs\IndexKbDocumentJob;
 use App\Domains\AI\Models\KbDocument;
 use App\Domains\AI\Models\KnowledgeBase;
 use App\Domains\AI\Models\Module;
@@ -20,14 +21,18 @@ use Laravel\Ai\Responses\Data\Meta;
 use Laravel\Ai\Responses\Data\Usage;
 use Laravel\Ai\Responses\StructuredAgentResponse;
 use Modules\CommerceAssist\Agents\ClassifyIntentAgent;
+use Modules\CommerceAssist\Agents\MineHistoryAgent;
 use Modules\CommerceAssist\Agents\ValidateFactsAgent;
 use Modules\CommerceAssist\Agents\WriteReplyAgent;
 use Modules\CommerceAssist\Jobs\IndexApprovedResponseJob;
+use Modules\CommerceAssist\Jobs\MineSentHistoryJob;
 use Modules\CommerceAssist\Jobs\RefreshDraftsForFactJob;
 use Modules\CommerceAssist\Models\ApprovedResponse;
 use Modules\CommerceAssist\Models\CommerceIntent;
 use Modules\CommerceAssist\Models\CommerceSetting;
 use Modules\CommerceAssist\Models\Generation;
+use Modules\CommerceAssist\Models\HistoryLearning;
+use Modules\CommerceAssist\Models\HistoryScan;
 use Modules\CommerceAssist\Models\LiveFact;
 use Modules\CommerceAssist\Models\ReplayRun;
 use Modules\CommerceAssist\Models\ShopifySnapshot;
@@ -1286,3 +1291,344 @@ test('the generation pipeline stores the carrier snapshot it drafted against', f
     expect($generation->tracking_snapshot_id)->not->toBeNull()
         ->and($generation->sources['tracking'])->toContain('4PX Express');
 });
+
+function fakeHistoryAgent(array $items): void
+{
+    MineHistoryAgent::fake([
+        new StructuredAgentResponse(
+            invocationId: 'mine',
+            structured: ['items' => $items],
+            text: '{}',
+            usage: new Usage,
+            meta: new Meta('anthropic', 'claude-sonnet-4-6'),
+        ),
+    ]);
+}
+
+function addSentReply(?string $body = null): Thread
+{
+    $body ??= 'Preorders currently ship in three to four weeks. Tracking appears after the warehouse dispatches the order.';
+
+    return Thread::factory()->create([
+        'conversation_id' => test()->conversation->id,
+        'user_id' => test()->admin->id,
+        'customer_id' => null,
+        'type' => 'message',
+        'body' => '<p>'.$body.'</p>',
+        'body_plain' => $body,
+    ]);
+}
+
+test('learn from history page shows sent reply counts', function () {
+    addSentReply();
+
+    $this->actingAs($this->admin)
+        ->get('/settings/commerce-assist/learn')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Settings/CommerceAssistLearn')
+            ->where('stats.sent_replies', 1)
+            ->where('stats.unscanned', 1)
+            ->where('stats.examples', 0)
+            ->has('learnings', 0));
+});
+
+test('agents cannot open learn from history', function () {
+    $agent = User::factory()->create([
+        'workspace_id' => $this->workspace->id,
+        'role' => 'agent',
+    ]);
+
+    $this->actingAs($agent)
+        ->get('/settings/commerce-assist/learn')
+        ->assertForbidden();
+});
+
+test('scanning sent history queues a mining job', function () {
+    Queue::fake();
+    addSentReply();
+
+    $this->actingAs($this->admin)
+        ->post('/settings/commerce-assist/learn/scan')
+        ->assertRedirect();
+
+    Queue::assertPushed(MineSentHistoryJob::class);
+    expect(HistoryScan::where('workspace_id', $this->workspace->id)->count())->toBe(1)
+        ->and(HistoryScan::first()->status)->toBe('queued')
+        ->and(HistoryScan::first()->total_count)->toBe(1);
+});
+
+test('a second scan is rejected while one is already running', function () {
+    Queue::fake();
+    addSentReply();
+
+    $this->actingAs($this->admin)
+        ->post('/settings/commerce-assist/learn/scan')
+        ->assertRedirect();
+
+    $this->actingAs($this->admin)
+        ->post('/settings/commerce-assist/learn/scan')
+        ->assertRedirect()
+        ->assertSessionHas('error');
+
+    expect(HistoryScan::count())->toBe(1);
+});
+
+test('mining sent emails proposes knowledge facts and approved replies for review', function () {
+    $reply = addSentReply();
+
+    fakeHistoryAgent([
+        [
+            'email_index' => 1,
+            'kind' => 'knowledge',
+            'title' => 'Preorder dispatch window',
+            'body' => 'Preorders ship in three to four weeks. Tracking appears after dispatch.',
+            'customer_message' => null,
+            'final_reply' => null,
+            'intent' => 'order_status',
+            'subtype' => 'order_status.unfulfilled',
+            'product_keywords' => '',
+            'time_sensitive' => false,
+            'rationale' => 'Reusable dispatch policy.',
+        ],
+        [
+            'email_index' => 1,
+            'kind' => 'live_fact',
+            'title' => null,
+            'body' => 'Current preorder lead time is three to four weeks.',
+            'customer_message' => null,
+            'final_reply' => null,
+            'intent' => 'order_status',
+            'subtype' => null,
+            'product_keywords' => 'preorder',
+            'time_sensitive' => true,
+            'rationale' => 'Lead time will change.',
+        ],
+        [
+            'email_index' => 1,
+            'kind' => 'approved_reply',
+            'title' => null,
+            'body' => 'Tone matches how the team explains preorder dispatch.',
+            'customer_message' => 'When will my preorder ship?',
+            'final_reply' => 'Preorders ship in three to four weeks. Tracking appears after dispatch.',
+            'intent' => 'order_status',
+            'subtype' => 'order_status.unfulfilled',
+            'product_keywords' => '',
+            'time_sensitive' => false,
+            'rationale' => 'Reusable wording.',
+        ],
+    ]);
+
+    $this->actingAs($this->admin)
+        ->post('/settings/commerce-assist/learn/scan')
+        ->assertRedirect();
+
+    $pending = HistoryLearning::where('status', 'pending')->orderBy('id')->get();
+
+    expect($pending)->toHaveCount(3)
+        ->and($pending->pluck('kind')->all())->toBe(['knowledge', 'live_fact', 'approved_reply'])
+        ->and(HistoryScan::first()->status)->toBe('completed')
+        ->and($pending->first()->thread_id)->toBe($reply->id)
+        ->and(ApprovedResponse::count())->toBe(0)
+        ->and(LiveFact::count())->toBe(0)
+        ->and(KbDocument::count())->toBe(0);
+
+    $this->actingAs($this->admin)
+        ->get('/settings/commerce-assist/learn')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Settings/CommerceAssistLearn')
+            ->has('learnings', 3)
+            ->where('stats.pending', 3));
+});
+
+test('accepting a knowledge proposal creates a knowledge base document', function () {
+    Queue::fake();
+    addSentReply();
+
+    $learning = HistoryLearning::create([
+        'workspace_id' => $this->workspace->id,
+        'conversation_id' => $this->conversation->id,
+        'kind' => 'knowledge',
+        'status' => 'pending',
+        'title' => 'When tracking appears',
+        'body' => 'Tracking numbers appear after the warehouse dispatches the order, not when payment is taken.',
+        'rationale' => 'Policy taught in sent mail.',
+    ]);
+
+    $this->actingAs($this->admin)
+        ->post("/settings/commerce-assist/learn/{$learning->id}/accept", [
+            'kind' => 'knowledge',
+            'title' => 'When tracking appears',
+            'body' => 'Tracking numbers appear after the warehouse dispatches the order, not when payment is taken.',
+        ])
+        ->assertRedirect();
+
+    $document = KbDocument::first();
+
+    expect($document)->not->toBeNull()
+        ->and($document->title)->toBe('When tracking appears')
+        ->and($document->content)->toContain('warehouse dispatches')
+        ->and($document->knowledgeBase->workspace_id)->toBe($this->workspace->id)
+        ->and($learning->fresh()->status)->toBe('accepted')
+        ->and($learning->fresh()->accepted_type)->toBe('kb_document');
+
+    Queue::assertPushed(IndexKbDocumentJob::class);
+});
+
+test('accepting a fact proposal publishes a current fact', function () {
+    Queue::fake();
+    addSentReply();
+
+    $learning = HistoryLearning::create([
+        'workspace_id' => $this->workspace->id,
+        'conversation_id' => $this->conversation->id,
+        'kind' => 'live_fact',
+        'status' => 'pending',
+        'body' => 'Arcade cabinets are currently a 3-4 week preorder.',
+        'intent' => 'order_status',
+        'product_keywords' => ['cabinet'],
+        'time_sensitive' => true,
+        'expires_at' => now()->addDays(21),
+    ]);
+
+    $this->actingAs($this->admin)
+        ->post("/settings/commerce-assist/learn/{$learning->id}/accept", [
+            'kind' => 'live_fact',
+            'body' => 'Arcade cabinets are currently a 3-4 week preorder.',
+            'intent' => 'order_status',
+            'product_keywords' => 'cabinet',
+            'expires_at' => now()->addDays(21)->toDateString(),
+        ])
+        ->assertRedirect();
+
+    $fact = LiveFact::first();
+
+    expect($fact)->not->toBeNull()
+        ->and($fact->body)->toContain('3-4 week')
+        ->and($fact->isActive())->toBeTrue()
+        ->and($learning->fresh()->status)->toBe('accepted')
+        ->and($learning->fresh()->accepted_type)->toBe('live_fact');
+
+    Queue::assertPushed(RefreshDraftsForFactJob::class);
+});
+
+test('accepting an approved reply stores a generalized example', function () {
+    Queue::fake();
+    $reply = addSentReply();
+
+    $learning = HistoryLearning::create([
+        'workspace_id' => $this->workspace->id,
+        'conversation_id' => $this->conversation->id,
+        'thread_id' => $reply->id,
+        'kind' => 'approved_reply',
+        'status' => 'pending',
+        'customer_message' => 'When will the order ship?',
+        'final_reply' => 'Preorders ship in three to four weeks. Tracking appears after dispatch.',
+        'intent' => 'order_status',
+    ]);
+
+    $this->actingAs($this->admin)
+        ->post("/settings/commerce-assist/learn/{$learning->id}/accept", [
+            'kind' => 'approved_reply',
+            'customer_message' => 'When will the order ship?',
+            'final_reply' => 'Preorders ship in three to four weeks. Tracking appears after dispatch.',
+            'intent' => 'order_status',
+        ])
+        ->assertRedirect();
+
+    $example = ApprovedResponse::first();
+
+    expect($example)->not->toBeNull()
+        ->and($example->source)->toBe('history')
+        ->and($example->final_reply)->toContain('three to four weeks')
+        ->and($example->thread_id)->toBe($reply->id)
+        ->and($learning->fresh()->status)->toBe('accepted');
+
+    Queue::assertPushed(IndexApprovedResponseJob::class);
+    expect(KbDocument::count())->toBe(0);
+});
+
+test('skipping a proposal marks it rejected and does not save knowledge', function () {
+    $learning = HistoryLearning::create([
+        'workspace_id' => $this->workspace->id,
+        'kind' => 'knowledge',
+        'status' => 'pending',
+        'title' => 'One-off apology',
+        'body' => 'We refunded this specific order as a courtesy.',
+    ]);
+
+    $this->actingAs($this->admin)
+        ->post("/settings/commerce-assist/learn/{$learning->id}/reject")
+        ->assertRedirect();
+
+    expect($learning->fresh()->status)->toBe('rejected')
+        ->and(KbDocument::count())->toBe(0)
+        ->and(ApprovedResponse::count())->toBe(0);
+});
+
+test('already saved examples are not scanned again', function () {
+    Queue::fake();
+    $reply = addSentReply();
+
+    ApprovedResponse::create([
+        'workspace_id' => $this->workspace->id,
+        'conversation_id' => $this->conversation->id,
+        'thread_id' => $reply->id,
+        'customer_message' => 'Where is my order?',
+        'final_reply' => $reply->body_plain,
+        'source' => 'manual',
+        'created_by' => $this->admin->id,
+    ]);
+
+    $this->actingAs($this->admin)
+        ->post('/settings/commerce-assist/learn/scan')
+        ->assertRedirect();
+
+    expect(HistoryScan::first()->total_count)->toBe(0);
+    Queue::assertPushed(MineSentHistoryJob::class);
+});
+
+test('history learnings are scoped to the workspace', function () {
+    $other = Workspace::factory()->create();
+    HistoryLearning::create([
+        'workspace_id' => $other->id,
+        'kind' => 'knowledge',
+        'status' => 'pending',
+        'title' => 'Secret',
+        'body' => 'Other workspace policy.',
+    ]);
+
+    $this->actingAs($this->admin)
+        ->get('/settings/commerce-assist/learn')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('learnings', 0));
+});
+
+test('accept remaining replies saves every pending approved reply', function () {
+    Queue::fake();
+
+    HistoryLearning::create([
+        'workspace_id' => $this->workspace->id,
+        'kind' => 'approved_reply',
+        'status' => 'pending',
+        'customer_message' => 'Is this in stock?',
+        'final_reply' => 'Yes, this item is in stock and ships within a few days.',
+    ]);
+    HistoryLearning::create([
+        'workspace_id' => $this->workspace->id,
+        'kind' => 'knowledge',
+        'status' => 'pending',
+        'title' => 'Leave me',
+        'body' => 'Should not be bulk-accepted.',
+    ]);
+
+    $this->actingAs($this->admin)
+        ->post('/settings/commerce-assist/learn/accept-replies')
+        ->assertRedirect();
+
+    expect(ApprovedResponse::count())->toBe(1)
+        ->and(HistoryLearning::where('kind', 'approved_reply')->first()->status)->toBe('accepted')
+        ->and(HistoryLearning::where('kind', 'knowledge')->first()->status)->toBe('pending');
+});
+

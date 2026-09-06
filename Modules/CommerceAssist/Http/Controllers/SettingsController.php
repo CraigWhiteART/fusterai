@@ -11,6 +11,7 @@ use Inertia\Inertia;
 use Inertia\Response;
 use Modules\CommerceAssist\Http\Requests\UpdateSettingsRequest;
 use Modules\CommerceAssist\Models\CommerceSetting;
+use Modules\CommerceAssist\Services\HistoryMiner;
 use Modules\CommerceAssist\Services\IntentCatalog;
 use Modules\CommerceAssist\Services\ShopifyAccessTokenService;
 use Modules\CommerceAssist\Services\ShopifyClient;
@@ -19,7 +20,7 @@ use Throwable;
 
 class SettingsController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(Request $request, HistoryMiner $miner): Response
     {
         $this->authorize('manage-settings');
 
@@ -29,6 +30,7 @@ class SettingsController extends Controller
 
         return Inertia::render('Settings/CommerceAssist', [
             'providers' => TrackingProviderFactory::PROVIDERS,
+            'onboarding' => $miner->stats($workspaceId),
             'settings' => [
                 'shopify_shop_domain' => $settings->shopify_shop_domain,
                 'shopify_resolved_domain' => $settings->shopDomain(),

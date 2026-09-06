@@ -1,5 +1,5 @@
 import React from 'react';
-import { Head, router } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Button } from '@/Components/ui/button';
 import CommerceAssistNav from './CommerceAssistNav';
@@ -36,7 +36,13 @@ export default function CommerceAssistFacts({ facts }: Props) {
                 </div>
 
                 {active.length === 0 && (
-                    <p className="text-sm text-muted-foreground">No current facts. Add one from a conversation while reviewing a draft.</p>
+                    <p className="text-sm text-muted-foreground">
+                        No current facts.{' '}
+                        <Link href="/settings/commerce-assist/learn" className="text-primary hover:underline">
+                            Pull them from sent emails
+                        </Link>
+                        , or add one from a conversation while reviewing a draft.
+                    </p>
                 )}
 
                 <div className="space-y-3">

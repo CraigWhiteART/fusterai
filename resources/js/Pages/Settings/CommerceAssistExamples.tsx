@@ -1,5 +1,5 @@
 import React from 'react';
-import { Head, router, useForm } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Button } from '@/Components/ui/button';
 import { Label } from '@/Components/ui/label';
@@ -102,7 +102,15 @@ export default function CommerceAssistExamples({ examples, intents }: Props) {
                 </form>
 
                 <div className="space-y-3">
-                    {examples.length === 0 && <p className="text-sm text-muted-foreground">No approved replies yet.</p>}
+                    {examples.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                            No approved replies yet.{' '}
+                            <Link href="/settings/commerce-assist/learn" className="text-primary hover:underline">
+                                Learn them from sent emails
+                            </Link>
+                            , or paste a pair below.
+                        </p>
+                    )}
                     {examples.map((example) => (
                         <div key={example.id} className="rounded-xl border border-border bg-card p-4 space-y-2">
                             <div className="flex items-center justify-between gap-3">

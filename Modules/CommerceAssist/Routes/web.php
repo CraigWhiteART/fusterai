@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use Modules\CommerceAssist\Http\Controllers\ApprovedResponseController;
 use Modules\CommerceAssist\Http\Controllers\ConversationContextController;
 use Modules\CommerceAssist\Http\Controllers\ExampleController;
+use Modules\CommerceAssist\Http\Controllers\HistoryLearnController;
 use Modules\CommerceAssist\Http\Controllers\IntentController;
 use Modules\CommerceAssist\Http\Controllers\LiveFactController;
 use Modules\CommerceAssist\Http\Controllers\ReplayController;
@@ -28,6 +29,12 @@ Route::middleware(['auth', 'module.active:CommerceAssist'])->group(function () {
 
     Route::get('/settings/commerce-assist/facts', [LiveFactController::class, 'index'])->name('settings.commerce-assist.facts');
     Route::post('/settings/commerce-assist/facts/{fact}/retire', [LiveFactController::class, 'retire'])->name('settings.commerce-assist.facts.retire');
+
+    Route::get('/settings/commerce-assist/learn', [HistoryLearnController::class, 'index'])->name('settings.commerce-assist.learn');
+    Route::post('/settings/commerce-assist/learn/scan', [HistoryLearnController::class, 'scan'])->name('settings.commerce-assist.learn.scan');
+    Route::post('/settings/commerce-assist/learn/accept-replies', [HistoryLearnController::class, 'acceptReplies'])->name('settings.commerce-assist.learn.accept-replies');
+    Route::post('/settings/commerce-assist/learn/{learning}/accept', [HistoryLearnController::class, 'accept'])->name('settings.commerce-assist.learn.accept');
+    Route::post('/settings/commerce-assist/learn/{learning}/reject', [HistoryLearnController::class, 'reject'])->name('settings.commerce-assist.learn.reject');
 
     Route::get('/commerce-assist/conversations/{conversation}/fact-defaults', [LiveFactController::class, 'infer'])->name('commerce-assist.fact-defaults');
     Route::post('/commerce-assist/facts/preview', [LiveFactController::class, 'preview'])->name('commerce-assist.facts.preview');

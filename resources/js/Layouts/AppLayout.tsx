@@ -928,6 +928,18 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                                                     </DropdownMenuItem>
                                                     <DropdownMenuItem asChild>
                                                         <Link
+                                                            href="/settings/commerce-assist/learn"
+                                                            className={cn(
+                                                                'w-full',
+                                                                path.startsWith('/settings/commerce-assist/learn') && 'text-primary',
+                                                            )}
+                                                        >
+                                                            <BookOpenIcon className="h-4 w-4" />
+                                                            <span>Learn from history</span>
+                                                        </Link>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem asChild>
+                                                        <Link
                                                             href="/settings/commerce-assist/facts"
                                                             className={cn(
                                                                 'w-full',

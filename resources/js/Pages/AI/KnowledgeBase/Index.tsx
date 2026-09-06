@@ -1,9 +1,10 @@
 import React from 'react';
-import { Head, Link } from '@inertiajs/react';
+import { Head, Link, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Button } from '@/Components/ui/button';
 import { Badge } from '@/Components/ui/badge';
 import { Card, CardContent } from '@/Components/ui/card';
+import { type PageProps } from '@/types';
 
 interface KnowledgeBase {
     id: number;
@@ -19,6 +20,10 @@ interface Props {
 }
 
 export default function Index({ knowledgeBases }: Props) {
+    const commerceAssist = ((usePage<PageProps>().props as { activeModules?: string[] }).activeModules ?? []).includes(
+        'CommerceAssist',
+    );
+
     return (
         <AppLayout>
             <Head title="Knowledge Base" />
@@ -38,9 +43,16 @@ export default function Index({ knowledgeBases }: Props) {
                     <Card className="border-dashed">
                         <CardContent className="p-12 text-center">
                             <p className="text-muted-foreground">No knowledge bases yet.</p>
-                            <Link href={route('ai.knowledge-bases.create')} className="mt-4 inline-block">
-                                <Button variant="outline">Create your first</Button>
-                            </Link>
+                            <div className="mt-4 flex flex-wrap justify-center gap-2">
+                                <Link href={route('ai.knowledge-bases.create')}>
+                                    <Button variant="outline">Create your first</Button>
+                                </Link>
+                                {commerceAssist && (
+                                    <Link href="/settings/commerce-assist/learn">
+                                        <Button variant="ghost">Learn from sent emails</Button>
+                                    </Link>
+                                )}
+                            </div>
                         </CardContent>
                     </Card>
                 ) : (

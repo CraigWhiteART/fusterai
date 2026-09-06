@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Head, useForm } from '@inertiajs/react';
+import { Head, Link, useForm } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
@@ -11,6 +11,13 @@ import CommerceAssistNav from './CommerceAssistNav';
 
 interface Props {
     providers: Record<string, string>;
+    onboarding?: {
+        sent_replies: number;
+        unscanned: number;
+        examples: number;
+        facts: number;
+        documents: number;
+    };
     settings: {
         shopify_shop_domain: string | null;
         shopify_resolved_domain: string | null;
@@ -52,7 +59,11 @@ function connectionBadge(status: ConnectionTestStatus, off = false): { variant: 
     return { variant: 'outline', label: 'Not connected' };
 }
 
-export default function CommerceAssistSettings({ providers, settings }: Props) {
+export default function CommerceAssistSettings({
+    providers,
+    settings,
+    onboarding = { sent_replies: 0, unscanned: 0, examples: 0, facts: 0, documents: 0 },
+}: Props) {
     const [shopifyStatus, setShopifyStatus] = useState<ConnectionTestStatus>(
         settings.shopify_configured ? 'idle' : 'unconfigured',
     );
@@ -180,6 +191,21 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
                     </p>
                     <CommerceAssistNav current="/settings/commerce-assist" />
                 </div>
+
+                {onboarding.examples + onboarding.facts + onboarding.documents === 0 && onboarding.sent_replies > 0 && (
+                    <div className="rounded-xl border border-border bg-card p-5 max-w-xl space-y-2">
+                        <p className="text-sm font-semibold">Fill knowledge from mail you already sent</p>
+                        <p className="text-sm text-muted-foreground">
+                            Knowledge, current facts, and approved replies are empty. Scan {onboarding.unscanned} sent emails and
+                            review what to keep — instead of writing it all from memory.
+                        </p>
+                        <Link href="/settings/commerce-assist/learn">
+                            <Button type="button" variant="outline" size="sm">
+                                Learn from sent emails
+                            </Button>
+                        </Link>
+                    </div>
+                )}
 
                 <form onSubmit={submit} className="max-w-xl space-y-6">
                     <section className="rounded-xl border border-border bg-card p-5 space-y-4">
