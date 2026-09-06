@@ -22,6 +22,7 @@ interface Props {
         shopify_api_version: string;
         tracking_provider: string;
         tracking_key_set: boolean;
+        tracking_configured: boolean;
         tracking_store_uuid: string | null;
         tracking_store_uuid_default: string | null;
         tracking_stale_days: number;
@@ -31,10 +32,28 @@ interface Props {
     };
 }
 
-type ShopifyTestStatus = 'idle' | 'loading' | 'ok' | 'fail' | 'unconfigured';
+type ConnectionTestStatus = 'idle' | 'loading' | 'ok' | 'fail' | 'unconfigured';
+
+function connectionBadge(status: ConnectionTestStatus, off = false): { variant: 'success' | 'secondary' | 'destructive' | 'outline'; label: string } {
+    if (off && status === 'unconfigured') {
+        return { variant: 'outline', label: 'Off' };
+    }
+
+    if (status === 'ok') {
+        return { variant: 'success', label: 'Connected' };
+    }
+    if (status === 'loading' || status === 'idle') {
+        return { variant: 'secondary', label: 'Checking…' };
+    }
+    if (status === 'fail') {
+        return { variant: 'destructive', label: 'Failed' };
+    }
+
+    return { variant: 'outline', label: 'Not connected' };
+}
 
 export default function CommerceAssistSettings({ providers, settings }: Props) {
-    const [shopifyStatus, setShopifyStatus] = useState<ShopifyTestStatus>(
+    const [shopifyStatus, setShopifyStatus] = useState<ConnectionTestStatus>(
         settings.shopify_configured ? 'idle' : 'unconfigured',
     );
     const [shopifyMessage, setShopifyMessage] = useState(
@@ -56,6 +75,18 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
         preorder_tags: settings.preorder_tags,
         draft_only: settings.draft_only,
     });
+
+    const trackingConfigured = settings.tracking_configured;
+    const [trackingStatus, setTrackingStatus] = useState<ConnectionTestStatus>(
+        trackingConfigured ? 'idle' : 'unconfigured',
+    );
+    const [trackingMessage, setTrackingMessage] = useState(
+        trackingConfigured
+            ? 'API key saved. Testing…'
+            : settings.tracking_provider === 'none'
+              ? 'Carrier tracking is off.'
+              : 'Not connected. Choose a provider, save an API key, then test.',
+    );
 
     const testShopify = useCallback(async () => {
         if (!settings.shopify_configured) {
@@ -85,25 +116,57 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
         }
     }, [settings.shopify_configured]);
 
+    const testTracking = useCallback(async () => {
+        if (!trackingConfigured) {
+            setTrackingStatus('unconfigured');
+            setTrackingMessage(
+                settings.tracking_provider === 'none'
+                    ? 'Carrier tracking is off.'
+                    : 'Save a tracking API key first.',
+            );
+            return;
+        }
+
+        setTrackingStatus('loading');
+        setTrackingMessage('Calling the tracking provider…');
+        try {
+            const res = await fetch('/settings/commerce-assist/test-tracking', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector<HTMLMetaElement>('[name="csrf-token"]')?.content ?? '',
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+            const body = (await res.json()) as { ok?: boolean; message?: string };
+            const ok = Boolean(body.ok);
+            setTrackingStatus(ok ? 'ok' : 'fail');
+            setTrackingMessage(body.message ?? (ok ? 'Connected.' : 'Connection failed.'));
+        } catch {
+            setTrackingStatus('fail');
+            setTrackingMessage('Network error. Could not reach this server.');
+        }
+    }, [trackingConfigured, settings.tracking_provider]);
+
     useEffect(() => {
         if (settings.shopify_configured) {
             void testShopify();
         }
     }, [settings.shopify_configured, settings.shopify_shop_domain, settings.shopify_client_id, settings.shopify_secret_set, testShopify]);
 
+    useEffect(() => {
+        if (trackingConfigured) {
+            void testTracking();
+        }
+    }, [trackingConfigured, settings.tracking_provider, settings.tracking_key_set, settings.tracking_store_uuid, testTracking]);
+
     function submit(e: React.FormEvent) {
         e.preventDefault();
         post('/settings/commerce-assist');
     }
 
-    const shopifyBadge =
-        shopifyStatus === 'ok'
-            ? { variant: 'success' as const, label: 'Connected' }
-            : shopifyStatus === 'loading' || shopifyStatus === 'idle'
-              ? { variant: 'secondary' as const, label: 'Checking…' }
-              : shopifyStatus === 'fail'
-                ? { variant: 'destructive' as const, label: 'Failed' }
-                : { variant: 'outline' as const, label: 'Not connected' };
+    const shopifyBadge = connectionBadge(shopifyStatus);
+    const trackingBadge = connectionBadge(trackingStatus, settings.tracking_provider === 'none');
 
     return (
         <AppLayout>
@@ -206,13 +269,16 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
                     </section>
 
                     <section className="rounded-xl border border-border bg-card p-5 space-y-4">
-                        <div className="space-y-1">
-                            <h2 className="text-sm font-semibold">Carrier tracking</h2>
-                            <p className="text-xs text-muted-foreground">
-                                Looks up live carrier state before a draft is written, so replies quote real scans instead of a bare
-                                tracking number. Track123 is the cheapest option for a Shopify store already running its app — lookups are
-                                order-keyed, so there is no register-and-wait step.
-                            </p>
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                                <h2 className="text-sm font-semibold">Carrier tracking</h2>
+                                <p className="text-xs text-muted-foreground">
+                                    Looks up live carrier state before a draft is written, so replies quote real scans instead of a bare
+                                    tracking number. Track123 is the cheapest option for a Shopify store already running its app — lookups are
+                                    order-keyed, so there is no register-and-wait step.
+                                </p>
+                            </div>
+                            <Badge variant={trackingBadge.variant}>{trackingBadge.label}</Badge>
                         </div>
                         <div className="space-y-1.5">
                             <Label htmlFor="provider">Provider</Label>
@@ -261,6 +327,29 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
                                         </p>
                                     </div>
                                 )}
+                                <div className="flex flex-wrap items-center gap-3 pt-1">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => void testTracking()}
+                                        disabled={trackingStatus === 'loading' || !trackingConfigured}
+                                        title={!trackingConfigured ? 'Save a tracking API key first' : undefined}
+                                    >
+                                        {trackingStatus === 'loading' ? 'Testing…' : 'Test connection'}
+                                    </Button>
+                                    <p
+                                        className={
+                                            trackingStatus === 'ok'
+                                                ? 'text-sm text-success font-medium'
+                                                : trackingStatus === 'fail'
+                                                  ? 'text-sm text-destructive'
+                                                  : 'text-sm text-muted-foreground'
+                                        }
+                                    >
+                                        {trackingMessage}
+                                    </p>
+                                </div>
                             </>
                         )}
                     </section>

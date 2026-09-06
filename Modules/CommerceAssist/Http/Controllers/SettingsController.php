@@ -40,6 +40,7 @@ class SettingsController extends Controller
                 'shopify_api_version' => $settings->shopify_api_version,
                 'tracking_provider' => $settings->tracking_provider ?: 'none',
                 'tracking_key_set' => $settings->trackingKeyIsSet(),
+                'tracking_configured' => $settings->trackingEnabled(),
                 'tracking_store_uuid' => $settings->tracking_store_uuid,
                 'tracking_store_uuid_default' => $settings->trackingStoreUuid(),
                 'tracking_stale_days' => $settings->tracking_stale_days,
@@ -149,6 +150,51 @@ class SettingsController extends Controller
                 'shop' => $shop,
                 'scopes' => $scopes,
                 'expires_at' => $settings->shopify_access_token_expires_at?->toIso8601String(),
+            ]);
+        } catch (Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    public function testTracking(Request $request): JsonResponse
+    {
+        $this->authorize('manage-settings');
+
+        $settings = CommerceSetting::forWorkspace((int) $request->user()->workspace_id);
+        $providerKey = $settings->tracking_provider ?: TrackingProviderFactory::NONE;
+
+        if ($providerKey === TrackingProviderFactory::NONE) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Carrier tracking is switched off. Choose a provider and save an API key first.',
+            ]);
+        }
+
+        if (! $settings->trackingEnabled()) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Save a tracking API key first.',
+            ]);
+        }
+
+        $provider = app(TrackingProviderFactory::class)->make($settings);
+        if ($provider === null) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Tracking provider could not be created. Check the API key and store subdomain.',
+            ]);
+        }
+
+        try {
+            $result = $provider->ping();
+
+            return response()->json([
+                'ok' => true,
+                'message' => $result['message'],
+                'provider' => $provider->key(),
             ]);
         } catch (Throwable $e) {
             return response()->json([

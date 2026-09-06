@@ -2,6 +2,7 @@
 
 namespace Modules\CommerceAssist\Services\Tracking\Providers;
 
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Modules\CommerceAssist\Services\Tracking\TrackingEvent;
@@ -9,6 +10,7 @@ use Modules\CommerceAssist\Services\Tracking\TrackingProvider;
 use Modules\CommerceAssist\Services\Tracking\TrackingQuery;
 use Modules\CommerceAssist\Services\Tracking\TrackingResult;
 use Modules\CommerceAssist\Services\Tracking\TrackingStatus;
+use RuntimeException;
 
 /**
  * Track123's Shopify App API.
@@ -39,6 +41,46 @@ class Track123Provider implements TrackingProvider
     public function key(): string
     {
         return 'track123';
+    }
+
+    public function ping(): array
+    {
+        if ($this->apiKey === '') {
+            throw new RuntimeException('Track123 API key is not configured.');
+        }
+        if ($this->storeUuid === '') {
+            throw new RuntimeException('Track123 needs a store subdomain. Save the Shopify shop domain, or fill it in under Carrier tracking.');
+        }
+
+        $response = Http::withHeaders([
+            'X-Api-Key' => $this->apiKey,
+            'Content-Type' => 'application/json',
+        ])->timeout($this->timeout)->acceptJson()->get(
+            self::BASE_URL.'/'.rawurlencode($this->storeUuid).'/orders/0.json',
+        );
+
+        $status = $response->status();
+
+        if ($status === 401 || $status === 403) {
+            throw new RuntimeException('Track123 rejected the API key (HTTP '.$status.'). Check Track123 → Settings → General → API & Webhook.');
+        }
+
+        // A dummy order id is expected to 404. That still proves the key and
+        // store subdomain were accepted.
+        if ($status === 404 || $response->successful()) {
+            $store = $response->json('store.name') ?? $response->json('store.url');
+            $label = is_string($store) && $store !== '' ? $store : $this->storeUuid;
+
+            return ['message' => 'Connected to Track123 for '.$label.'.'];
+        }
+
+        try {
+            $response->throw();
+        } catch (RequestException $e) {
+            throw new RuntimeException('Track123 request failed: '.$e->getMessage(), previous: $e);
+        }
+
+        return ['message' => 'Connected to Track123 for '.$this->storeUuid.'.'];
     }
 
     public function lookup(TrackingQuery $query): ?TrackingResult

@@ -2,12 +2,14 @@
 
 namespace Modules\CommerceAssist\Services\Tracking\Providers;
 
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Modules\CommerceAssist\Services\Tracking\TrackingEvent;
 use Modules\CommerceAssist\Services\Tracking\TrackingProvider;
 use Modules\CommerceAssist\Services\Tracking\TrackingQuery;
 use Modules\CommerceAssist\Services\Tracking\TrackingResult;
 use Modules\CommerceAssist\Services\Tracking\TrackingStatus;
+use RuntimeException;
 
 /**
  * 17TRACK v2.2.
@@ -31,6 +33,37 @@ class SeventeenTrackProvider implements TrackingProvider
     public function key(): string
     {
         return '17track';
+    }
+
+    public function ping(): array
+    {
+        if ($this->apiKey === '') {
+            throw new RuntimeException('17TRACK API key is not configured.');
+        }
+
+        try {
+            $response = Http::withHeaders([
+                '17token' => $this->apiKey,
+                'Content-Type' => 'application/json',
+            ])->timeout($this->timeout)->post(self::BASE_URL.'/gettrackinfo', [
+                ['number' => '0'],
+            ]);
+            $response->throw();
+        } catch (RequestException $e) {
+            $status = $e->response?->status();
+            if ($status === 401 || $status === 403) {
+                throw new RuntimeException('17TRACK rejected the API key (HTTP '.$status.').');
+            }
+
+            throw new RuntimeException('17TRACK request failed: '.$e->getMessage(), previous: $e);
+        }
+
+        $code = $response->json('code');
+        if (is_numeric($code) && (int) $code < 0) {
+            throw new RuntimeException('17TRACK rejected the API key: '.(string) ($response->json('message') ?? $code));
+        }
+
+        return ['message' => 'Connected to 17TRACK.'];
     }
 
     public function lookup(TrackingQuery $query): ?TrackingResult

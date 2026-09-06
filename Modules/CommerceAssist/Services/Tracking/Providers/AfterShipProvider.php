@@ -3,12 +3,14 @@
 namespace Modules\CommerceAssist\Services\Tracking\Providers;
 
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Modules\CommerceAssist\Services\Tracking\TrackingEvent;
 use Modules\CommerceAssist\Services\Tracking\TrackingProvider;
 use Modules\CommerceAssist\Services\Tracking\TrackingQuery;
 use Modules\CommerceAssist\Services\Tracking\TrackingResult;
 use Modules\CommerceAssist\Services\Tracking\TrackingStatus;
+use RuntimeException;
 
 /**
  * AfterShip Tracking v4.
@@ -31,6 +33,31 @@ class AfterShipProvider implements TrackingProvider
     public function key(): string
     {
         return 'aftership';
+    }
+
+    public function ping(): array
+    {
+        if ($this->apiKey === '') {
+            throw new RuntimeException('AfterShip API key is not configured.');
+        }
+
+        try {
+            $response = $this->request()->get(self::BASE_URL.'/couriers');
+            $response->throw();
+        } catch (RequestException $e) {
+            $status = $e->response?->status();
+            if ($status === 401 || $status === 403) {
+                throw new RuntimeException('AfterShip rejected the API key (HTTP '.$status.').');
+            }
+
+            throw new RuntimeException('AfterShip request failed: '.$e->getMessage(), previous: $e);
+        }
+
+        $count = is_array($response->json('data.couriers')) ? count($response->json('data.couriers')) : 0;
+
+        return ['message' => $count > 0
+            ? 'Connected to AfterShip ('.$count.' couriers available).'
+            : 'Connected to AfterShip.'];
     }
 
     public function lookup(TrackingQuery $query): ?TrackingResult

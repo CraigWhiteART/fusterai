@@ -574,6 +574,90 @@ test('the refresh command skips a token that is still fresh', function () {
     expect(CommerceSetting::forWorkspace($this->workspace->id)->decryptAccessToken())->toBe('shpca_test');
 });
 
+test('tracking test-connection treats a track123 404 as a valid key', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(null, 404)]);
+
+    $this->actingAs($this->admin)
+        ->postJson('/settings/commerce-assist/test-tracking')
+        ->assertOk()
+        ->assertJson([
+            'ok' => true,
+            'provider' => 'track123',
+            'message' => 'Connected to Track123 for test-shop.',
+        ]);
+});
+
+test('tracking test-connection reports a rejected track123 key', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(['error' => 'Unauthorized'], 401)]);
+
+    $response = $this->actingAs($this->admin)
+        ->postJson('/settings/commerce-assist/test-tracking')
+        ->assertOk()
+        ->assertJson(['ok' => false]);
+
+    expect($response->json('message'))->toContain('rejected the API key');
+});
+
+test('tracking test-connection fails when tracking is switched off', function () {
+    $this->actingAs($this->admin)
+        ->postJson('/settings/commerce-assist/test-tracking')
+        ->assertOk()
+        ->assertJson([
+            'ok' => false,
+            'message' => 'Carrier tracking is switched off. Choose a provider and save an API key first.',
+        ]);
+});
+
+test('tracking test-connection fails when no api key is saved', function () {
+    CommerceSetting::forWorkspace($this->workspace->id)->update([
+        'tracking_provider' => 'track123',
+        'shopify_shop_domain' => 'test-shop.myshopify.com',
+    ]);
+
+    $this->actingAs($this->admin)
+        ->postJson('/settings/commerce-assist/test-tracking')
+        ->assertOk()
+        ->assertJson([
+            'ok' => false,
+            'message' => 'Save a tracking API key first.',
+        ]);
+});
+
+test('tracking test-connection is forbidden for non-admin users', function () {
+    $agent = User::factory()->create([
+        'workspace_id' => $this->workspace->id,
+        'role' => 'agent',
+    ]);
+
+    $this->actingAs($agent)
+        ->postJson('/settings/commerce-assist/test-tracking')
+        ->assertForbidden();
+});
+
+test('tracking test-connection accepts an aftership courier list as a valid key', function () {
+    enableShopify([
+        'tracking_provider' => 'aftership',
+        'tracking_api_key' => Crypt::encryptString('aftership_secret'),
+    ]);
+
+    Http::fake([
+        'https://api.aftership.com/*' => Http::response([
+            'data' => ['couriers' => [['slug' => 'fedex'], ['slug' => 'ups']]],
+        ]),
+    ]);
+
+    $this->actingAs($this->admin)
+        ->postJson('/settings/commerce-assist/test-tracking')
+        ->assertOk()
+        ->assertJson([
+            'ok' => true,
+            'provider' => 'aftership',
+            'message' => 'Connected to AfterShip (2 couriers available).',
+        ]);
+});
+
 test('admins can update intent rules', function () {
     IntentCatalog::ensureForWorkspace($this->workspace->id);
     $intent = CommerceIntent::where('workspace_id', $this->workspace->id)->where('slug', 'tracking.no_updates')->first();

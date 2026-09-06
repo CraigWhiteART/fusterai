@@ -13,6 +13,7 @@ Route::middleware(['auth', 'module.active:CommerceAssist'])->group(function () {
     Route::get('/settings/commerce-assist', [SettingsController::class, 'index'])->name('settings.commerce-assist');
     Route::post('/settings/commerce-assist', [SettingsController::class, 'update'])->name('settings.commerce-assist.update');
     Route::post('/settings/commerce-assist/test-shopify', [SettingsController::class, 'testShopify'])->name('settings.commerce-assist.test-shopify');
+    Route::post('/settings/commerce-assist/test-tracking', [SettingsController::class, 'testTracking'])->name('settings.commerce-assist.test-tracking');
 
     Route::get('/settings/commerce-assist/intents', [IntentController::class, 'index'])->name('settings.commerce-assist.intents');
     Route::put('/settings/commerce-assist/intents/{intent}', [IntentController::class, 'update'])->name('settings.commerce-assist.intents.update');

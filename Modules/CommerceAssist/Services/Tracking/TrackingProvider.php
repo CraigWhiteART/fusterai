@@ -13,4 +13,12 @@ interface TrackingProvider
     public function key(): string;
 
     public function lookup(TrackingQuery $query): ?TrackingResult;
+
+    /**
+     * Cheap round-trip used by the settings "Test connection" button.
+     * Throws when the key is rejected or the provider cannot be reached.
+     *
+     * @return array{message: string}
+     */
+    public function ping(): array;
 }
