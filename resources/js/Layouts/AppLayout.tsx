@@ -54,6 +54,7 @@ import {
     GlobeIcon,
     ShuffleIcon,
     ThumbsUpIcon,
+    ShoppingBagIcon,
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -214,6 +215,7 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
             '/settings/routing',
             '/settings/sla',
             '/settings/survey',
+            '/settings/commerce-assist',
             '/settings',
         ].some((h) => path.startsWith(h)) &&
         !customNavActive &&
@@ -912,6 +914,43 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                                                         <span>Customer Portal</span>
                                                     </Link>
                                                 </DropdownMenuItem>
+                                            )}
+                                            {(usePage<PageProps>().props as any).activeModules?.includes('CommerceAssist') && (
+                                                <>
+                                                    <DropdownMenuItem asChild>
+                                                        <Link
+                                                            href="/settings/commerce-assist"
+                                                            className={cn('w-full', path === '/settings/commerce-assist' && 'text-primary')}
+                                                        >
+                                                            <ShoppingBagIcon className="h-4 w-4" />
+                                                            <span>Commerce Assist</span>
+                                                        </Link>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem asChild>
+                                                        <Link
+                                                            href="/settings/commerce-assist/examples"
+                                                            className={cn(
+                                                                'w-full',
+                                                                path.startsWith('/settings/commerce-assist/examples') && 'text-primary',
+                                                            )}
+                                                        >
+                                                            <MessageSquareTextIcon className="h-4 w-4" />
+                                                            <span>Approved Replies</span>
+                                                        </Link>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem asChild>
+                                                        <Link
+                                                            href="/settings/commerce-assist/replay"
+                                                            className={cn(
+                                                                'w-full',
+                                                                path.startsWith('/settings/commerce-assist/replay') && 'text-primary',
+                                                            )}
+                                                        >
+                                                            <BrainIcon className="h-4 w-4" />
+                                                            <span>AI Replay</span>
+                                                        </Link>
+                                                    </DropdownMenuItem>
+                                                </>
                                             )}
                                         </DropdownMenuGroup>
                                     </DropdownMenuContent>

@@ -41,6 +41,7 @@ interface Props {
     convFolders: number[];
     mailboxes: Mailbox[];
     survey?: SurveyData | null;
+    commerceAssist?: Record<string, unknown> | null;
     isFollowing: boolean;
 }
 
@@ -51,7 +52,7 @@ const priorityConfig = {
     urgent: { label: 'Urgent', color: 'bg-destructive/10 text-destructive' },
 } as const;
 
-export default function ConversationShow({ conversation, agents, tags, folders, convFolders, mailboxes, survey, isFollowing }: Props) {
+export default function ConversationShow({ conversation, agents, tags, folders, convFolders, mailboxes, survey, commerceAssist, isFollowing }: Props) {
     const { aiConfigured } = usePage<{ aiConfigured: boolean }>().props;
 
     const [aiSuggestion, setAiSuggestion] = useState<{ id: number | null; content: string } | null>(
@@ -334,14 +335,14 @@ export default function ConversationShow({ conversation, agents, tags, folders, 
                     {/* Threads */}
                     <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4 bg-muted/10">
                         {threads.map((thread) => (
-                            <ThreadBubble key={thread.id} thread={thread} />
+                            <ThreadBubble key={thread.id} thread={thread} conversation={conversation} commerceAssist={commerceAssist} />
                         ))}
                         <SlotRenderer name="conversation.threads.after" props={{ conversation, threads }} />
                     </div>
 
                     {/* Reply editor */}
                     <div className="border-t border-border/60 bg-background p-4 shrink-0">
-                        <SlotRenderer name="conversation.reply.before" props={{ conversation }} />
+                        <SlotRenderer name="conversation.reply.before" props={{ conversation, commerceAssist }} />
                         <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-1">
                                 {(['message', 'note'] as const).map((t) => (
@@ -541,7 +542,7 @@ export default function ConversationShow({ conversation, agents, tags, folders, 
 
                     <SlotRenderer
                         name="conversation.sidebar.bottom"
-                        props={{ conversation, survey, conversationStatus: conversation.status }}
+                        props={{ conversation, survey, conversationStatus: conversation.status, commerceAssist }}
                     />
                 </div>
             </div>
@@ -551,7 +552,15 @@ export default function ConversationShow({ conversation, agents, tags, folders, 
 
 // ── Thread bubble ────────────────────────────────────────────────
 
-function ThreadBubble({ thread }: { thread: Thread }) {
+function ThreadBubble({
+    thread,
+    conversation,
+    commerceAssist,
+}: {
+    thread: Thread;
+    conversation: Conversation;
+    commerceAssist?: Record<string, unknown> | null;
+}) {
     const isFromCustomer = !!thread.customer_id;
     const isNote = thread.type === 'note';
     const isActivity = thread.type === 'activity';
@@ -610,6 +619,7 @@ function ThreadBubble({ thread }: { thread: Thread }) {
                         ))}
                     </div>
                 )}
+                <SlotRenderer name="conversation.thread.actions" props={{ thread, conversation, commerceAssist }} />
             </div>
         </div>
     );

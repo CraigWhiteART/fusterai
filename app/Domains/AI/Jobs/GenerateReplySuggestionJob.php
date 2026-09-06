@@ -8,6 +8,7 @@ use App\Domains\Conversation\Models\Conversation;
 use App\Events\AiSuggestionFailed;
 use App\Events\AiSuggestionReady;
 use App\Services\AiSettingsService;
+use App\Support\Hooks;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -33,6 +34,18 @@ class GenerateReplySuggestionJob implements ShouldQueue
     public function handle(): void
     {
         $conversation = $this->conversation->load(['customer', 'mailbox', 'threads' => fn ($q) => $q->latest()->limit(10)]);
+
+        try {
+            $handled = Hooks::applyFilters('ai.generate_reply', false, $conversation);
+            if ($handled === true) {
+                return;
+            }
+        } catch (\Throwable $e) {
+            Log::warning('ai.generate_reply filter failed; using default reply agent', [
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         try {
             app(AiSettingsService::class)->withWorkspaceCredentials(

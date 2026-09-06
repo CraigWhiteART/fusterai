@@ -1,0 +1,10 @@
+{
+    "alias": "CommerceAssist",
+    "name": "Commerce Assist",
+    "description": "Shopify-aware reply writer with approved-response retrieval, per-intent rules, and a fact validator. Isolated from Fuster core.",
+    "version": "1.0.0",
+    "hooks": {
+        "actions": ["thread.created"],
+        "filters": ["ai.generate_reply", "conversation.show.extra"]
+    }
+}

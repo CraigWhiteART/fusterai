@@ -731,6 +731,16 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
+        Module::firstOrCreate(
+            ['alias' => 'CommerceAssist'],
+            [
+                'name' => 'Commerce Assist',
+                'version' => '1.0.0',
+                'active' => false,
+                'config' => [],
+            ]
+        );
+
         $this->command->info('✓ Seeded: 1 workspace, 4 users, 3 mailboxes, 16 customers, 35 conversations, 10 tags, 5 automation rules, 8 KB articles, 2 modules');
     }
 }

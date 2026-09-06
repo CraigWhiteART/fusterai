@@ -11,6 +11,7 @@ use App\Events\ConversationUpdated;
 use App\Events\NewThreadReceived;
 use App\Models\ConversationRead;
 use App\Models\User;
+use App\Support\Hooks;
 use App\Notifications\AgentMentionedNotification;
 use App\Notifications\ConversationFollowerNotification;
 use App\Notifications\NewCustomerReplyNotification;
@@ -52,6 +53,8 @@ class ThreadService
                 'size' => $file->getSize(),
             ]);
         }
+
+        Hooks::doAction('thread.created', $thread);
 
         if ($type === ThreadType::Message) {
             $conversation->update(['last_reply_at' => now()]);

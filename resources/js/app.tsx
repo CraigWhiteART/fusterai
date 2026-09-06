@@ -24,6 +24,20 @@ const moduleSlots: Record<string, { slot: string; component: React.LazyExoticCom
             component: React.lazy(() => import('../../Modules/SatisfactionSurvey/Resources/js/SurveySidebarPanel')),
         },
     ],
+    CommerceAssist: [
+        {
+            slot: 'conversation.sidebar.bottom',
+            component: React.lazy(() => import('../../Modules/CommerceAssist/Resources/js/ConversationPanel')),
+        },
+        {
+            slot: 'conversation.reply.before',
+            component: React.lazy(() => import('../../Modules/CommerceAssist/Resources/js/DraftLearningBanner')),
+        },
+        {
+            slot: 'conversation.thread.actions',
+            component: React.lazy(() => import('../../Modules/CommerceAssist/Resources/js/ThreadExampleButton')),
+        },
+    ],
 };
 
 const appName = document.querySelector('meta[name="app-name"]')?.getAttribute('content') ?? 'FusterAI';
