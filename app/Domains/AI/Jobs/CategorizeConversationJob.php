@@ -46,7 +46,10 @@ class CategorizeConversationJob implements ShouldQueue
             /** @var StructuredAgentResponse $response */
             $response = app(AiSettingsService::class)->withWorkspaceCredentials(
                 $conversation->workspace_id,
-                fn ($lab, $model) => (new CategorizationAgent)->prompt($prompt, provider: $lab, model: $model),
+                fn ($lab, $model, $providerOptions = []) => (new CategorizationAgent)
+                    ->withProviderOptions($providerOptions)
+                    ->prompt($prompt, provider: $lab, model: $model),
+                task: 'auto_categorization',
             );
 
             // StructuredAgentResponse implements ArrayAccess, so use array access or toArray()

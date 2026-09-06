@@ -2,6 +2,7 @@
 
 namespace App\Ai\Agents;
 
+use App\Ai\Concerns\HasConfigurableProviderOptions;
 use App\Ai\Tools\SearchKnowledgeBase;
 use App\Domains\Conversation\Models\Conversation;
 use App\Domains\Conversation\Models\Thread;
@@ -12,6 +13,7 @@ use Laravel\Ai\Attributes\Provider;
 use Laravel\Ai\Attributes\Temperature;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\Conversational;
+use Laravel\Ai\Contracts\HasProviderOptions;
 use Laravel\Ai\Contracts\HasTools;
 use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Messages\Message;
@@ -21,8 +23,9 @@ use Laravel\Ai\Promptable;
 #[Model('claude-opus-4-6')]
 #[MaxTokens(1024)]
 #[Temperature(0.7)]
-class ReplySuggestionAgent implements Agent, Conversational, HasTools
+class ReplySuggestionAgent implements Agent, Conversational, HasTools, HasProviderOptions
 {
+    use HasConfigurableProviderOptions;
     use Promptable;
 
     public function __construct(

@@ -12,6 +12,7 @@ const OPENROUTER_MODELS = [
     { value: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (via OpenRouter)' },
     { value: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet (via OpenRouter)' },
     { value: 'openai/gpt-4o', label: 'GPT-4o (via OpenRouter)' },
+    { value: 'openai/o3-mini', label: 'o3-mini (via OpenRouter)' },
     { value: 'google/gemini-2.0-flash-001', label: 'Gemini 2.0 Flash (via OpenRouter)' },
     { value: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B (via OpenRouter)' },
     { value: 'mistralai/mistral-small-3.1-24b-instruct', label: 'Mistral Small 3.1 (via OpenRouter)' },
@@ -33,6 +34,16 @@ const OPENAI_MODELS = [
     { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
     { value: 'o3-mini', label: 'o3-mini' },
     { value: 'o1', label: 'o1' },
+];
+
+const REASONING_EFFORTS = [
+    { value: 'none', label: 'None — disable reasoning / thinking' },
+    { value: 'minimal', label: 'Minimal' },
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'xhigh', label: 'Extra high' },
+    { value: 'max', label: 'Max' },
 ];
 
 const PRESETS = [
@@ -61,6 +72,16 @@ interface AiConfig {
         auto_categorization: boolean;
         summarization: boolean;
     };
+    task_models?: {
+        reply_suggestions: string | null;
+        auto_categorization: string | null;
+        summarization: string | null;
+    };
+    reasoning?: {
+        effort: string;
+        exclude: boolean;
+        max_tokens: number | null;
+    };
     rag: { top_k: number; min_score: number };
 }
 
@@ -68,7 +89,6 @@ interface Props extends PageProps {
     aiConfig: AiConfig;
 }
 
-// ── Small select primitive (avoids dependency on shadcn Select for this form) ──
 function NativeSelect({
     id,
     value,
@@ -100,6 +120,77 @@ function Field({ label, hint, children, error }: { label: string; hint?: string;
             <label className="text-sm font-medium">{label}</label>
             {children}
             {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+            {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+    );
+}
+
+function ModelPicker({
+    value,
+    onChange,
+    provider,
+    models,
+    allowEmpty = false,
+    emptyLabel = 'Use default model',
+    error,
+}: {
+    value: string;
+    onChange: (v: string) => void;
+    provider: Provider;
+    models: { value: string; label: string }[];
+    allowEmpty?: boolean;
+    emptyLabel?: string;
+    error?: string;
+}) {
+    const isCompatible = provider === 'openai-compatible';
+    const isOpenRouter = provider === 'openrouter';
+
+    if (isCompatible) {
+        return (
+            <div className="space-y-1.5">
+                <Input
+                    placeholder={allowEmpty ? 'Leave blank to use default' : 'e.g. meta-llama/llama-3.1-70b-instruct'}
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    autoComplete="off"
+                />
+                {error && <p className="text-xs text-destructive">{error}</p>}
+            </div>
+        );
+    }
+
+    if (isOpenRouter) {
+        return (
+            <div className="space-y-1.5">
+                <NativeSelect value={value} onChange={onChange}>
+                    <option value="">{allowEmpty ? emptyLabel : 'Select a model'}</option>
+                    {models.map((m) => (
+                        <option key={m.value} value={m.value}>
+                            {m.label}
+                        </option>
+                    ))}
+                </NativeSelect>
+                <Input
+                    placeholder="Or type a custom model slug e.g. cohere/command-r-plus"
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    autoComplete="off"
+                />
+                {error && <p className="text-xs text-destructive">{error}</p>}
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-1.5">
+            <NativeSelect value={value} onChange={onChange}>
+                <option value="">{allowEmpty ? emptyLabel : 'Select a model…'}</option>
+                {models.map((m) => (
+                    <option key={m.value} value={m.value}>
+                        {m.label}
+                    </option>
+                ))}
+            </NativeSelect>
             {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
     );
@@ -137,6 +228,12 @@ export default function AIConfig({ aiConfig }: Props) {
         feature_reply_suggestions: aiConfig.features?.reply_suggestions ?? true,
         feature_auto_categorization: aiConfig.features?.auto_categorization ?? true,
         feature_summarization: aiConfig.features?.summarization ?? true,
+        model_reply_suggestions: aiConfig.task_models?.reply_suggestions ?? '',
+        model_auto_categorization: aiConfig.task_models?.auto_categorization ?? '',
+        model_summarization: aiConfig.task_models?.summarization ?? '',
+        reasoning_effort: aiConfig.reasoning?.effort ?? 'none',
+        reasoning_exclude: aiConfig.reasoning?.exclude ?? false,
+        reasoning_max_tokens: aiConfig.reasoning?.max_tokens ?? ('' as number | ''),
         rag_top_k: aiConfig.rag?.top_k ?? 5,
         rag_min_score: aiConfig.rag?.min_score ?? 0.7,
     });
@@ -149,6 +246,7 @@ export default function AIConfig({ aiConfig }: Props) {
     const isCompatible = data.provider === 'openai-compatible';
     const isOpenRouter = data.provider === 'openrouter';
     const models = data.provider === 'anthropic' ? ANTHROPIC_MODELS : data.provider === 'openrouter' ? OPENROUTER_MODELS : OPENAI_MODELS;
+    const showReasoningBudget = data.provider === 'anthropic' && data.reasoning_effort !== 'none';
 
     return (
         <AppLayout>
@@ -158,21 +256,22 @@ export default function AIConfig({ aiConfig }: Props) {
                 <div>
                     <h1 className="text-xl font-semibold">AI Configuration</h1>
                     <p className="text-sm text-muted-foreground mt-1">
-                        Choose any AI provider. Settings are stored securely in the database — no .env changes needed.
+                        Choose any AI provider. Use different models per task and set a reasoning level when supported.
                     </p>
                 </div>
 
-                {/* Status banner */}
                 <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3">
                     <div className="flex-1 text-sm">
                         <span className="font-medium">{PROVIDER_LABELS[data.provider]}</span>
-                        {data.model && <span className="text-muted-foreground"> · {data.model}</span>}
+                        {data.model && <span className="text-muted-foreground"> · default {data.model}</span>}
+                        {data.reasoning_effort !== 'none' && (
+                            <span className="text-muted-foreground"> · reasoning {data.reasoning_effort}</span>
+                        )}
                     </div>
                     {aiConfig.key_set ? <Badge variant="success">API key saved</Badge> : <Badge variant="destructive">No API key</Badge>}
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-6">
-                    {/* ── Provider ─────────────────────────────────────────── */}
                     <section className="bg-white border border-border rounded-lg p-6 space-y-5">
                         <h2 className="font-medium text-base">Provider</h2>
 
@@ -183,6 +282,9 @@ export default function AIConfig({ aiConfig }: Props) {
                                     setData('provider', v as Provider);
                                     setData('model', '');
                                     setData('base_url', '');
+                                    setData('model_reply_suggestions', '');
+                                    setData('model_auto_categorization', '');
+                                    setData('model_summarization', '');
                                 }}
                             >
                                 <option value="anthropic">Anthropic — Claude models</option>
@@ -192,7 +294,6 @@ export default function AIConfig({ aiConfig }: Props) {
                             </NativeSelect>
                         </Field>
 
-                        {/* Base URL — only for openai-compatible (OpenRouter has a fixed URL) */}
                         {isCompatible && (
                             <Field
                                 label="Base URL"
@@ -206,7 +307,6 @@ export default function AIConfig({ aiConfig }: Props) {
                                     onChange={(e) => setData('base_url', e.target.value)}
                                     autoComplete="off"
                                 />
-                                {/* Quick-fill presets */}
                                 <div className="flex flex-wrap gap-1.5 mt-2">
                                     {PRESETS.map((p) => (
                                         <button
@@ -222,7 +322,6 @@ export default function AIConfig({ aiConfig }: Props) {
                             </Field>
                         )}
 
-                        {/* API Key */}
                         <Field
                             label="API Key"
                             hint={
@@ -232,79 +331,147 @@ export default function AIConfig({ aiConfig }: Props) {
                             }
                             error={errors.api_key}
                         >
-                            <div className="relative">
-                                <Input
-                                    type="password"
-                                    placeholder={aiConfig.key_set ? '●●●●●●●● (saved)' : 'sk-…'}
-                                    value={data.api_key}
-                                    onChange={(e) => setData('api_key', e.target.value)}
-                                    autoComplete="off"
-                                />
-                            </div>
+                            <Input
+                                type="password"
+                                placeholder={aiConfig.key_set ? '●●●●●●●● (saved)' : 'sk-…'}
+                                value={data.api_key}
+                                onChange={(e) => setData('api_key', e.target.value)}
+                                autoComplete="off"
+                            />
                         </Field>
 
-                        {/* Model */}
                         <Field
-                            label="Model"
-                            hint={isCompatible ? 'Enter the exact model identifier from your provider.' : undefined}
+                            label="Default model"
+                            hint={
+                                isCompatible
+                                    ? 'Enter the exact model identifier from your provider. Used when a task has no override.'
+                                    : 'Used for all tasks unless you set a per-task override below.'
+                            }
                             error={errors.model}
                         >
-                            {isCompatible ? (
-                                <div className="space-y-1.5">
-                                    <Input
-                                        placeholder="e.g. meta-llama/llama-3.1-70b-instruct"
-                                        value={data.model}
-                                        onChange={(e) => setData('model', e.target.value)}
-                                        autoComplete="off"
-                                    />
-                                    <a
-                                        href="https://openrouter.ai/models"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-xs text-primary hover:underline"
-                                    >
-                                        Browse models →
-                                    </a>
-                                </div>
-                            ) : isOpenRouter ? (
-                                <div className="space-y-1.5">
-                                    <NativeSelect value={data.model} onChange={(v) => setData('model', v)}>
-                                        <option value="">Select a model</option>
-                                        {OPENROUTER_MODELS.map((m) => (
-                                            <option key={m.value} value={m.value}>
-                                                {m.label}
-                                            </option>
-                                        ))}
-                                    </NativeSelect>
-                                    <Input
-                                        placeholder="Or type a custom model slug e.g. cohere/command-r-plus"
-                                        value={data.model}
-                                        onChange={(e) => setData('model', e.target.value)}
-                                        autoComplete="off"
-                                    />
-                                    <a
-                                        href="https://openrouter.ai/models"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-xs text-primary hover:underline"
-                                    >
-                                        Browse all 200+ OpenRouter models →
-                                    </a>
-                                </div>
-                            ) : (
-                                <NativeSelect value={data.model} onChange={(v) => setData('model', v)}>
-                                    <option value="">Select a model…</option>
-                                    {models.map((m) => (
-                                        <option key={m.value} value={m.value}>
-                                            {m.label}
-                                        </option>
-                                    ))}
-                                </NativeSelect>
+                            <ModelPicker
+                                value={data.model}
+                                onChange={(v) => setData('model', v)}
+                                provider={data.provider}
+                                models={models}
+                            />
+                            {isOpenRouter && (
+                                <a
+                                    href="https://openrouter.ai/models"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-primary hover:underline"
+                                >
+                                    Browse all 200+ OpenRouter models →
+                                </a>
                             )}
                         </Field>
                     </section>
 
-                    {/* ── Feature Toggles ───────────────────────────────────── */}
+                    <section className="bg-white border border-border rounded-lg p-6 space-y-5">
+                        <div>
+                            <h2 className="font-medium text-base">Models by task</h2>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                Optional overrides. Leave blank to use the default model. Tip: use a fast/cheap model for
+                                categorization and a stronger one for reply suggestions.
+                            </p>
+                        </div>
+
+                        <Field label="Reply suggestions" error={errors.model_reply_suggestions}>
+                            <ModelPicker
+                                value={data.model_reply_suggestions}
+                                onChange={(v) => setData('model_reply_suggestions', v)}
+                                provider={data.provider}
+                                models={models}
+                                allowEmpty
+                            />
+                        </Field>
+
+                        <Field label="Auto-categorization" error={errors.model_auto_categorization}>
+                            <ModelPicker
+                                value={data.model_auto_categorization}
+                                onChange={(v) => setData('model_auto_categorization', v)}
+                                provider={data.provider}
+                                models={models}
+                                allowEmpty
+                            />
+                        </Field>
+
+                        <Field label="Summarization" error={errors.model_summarization}>
+                            <ModelPicker
+                                value={data.model_summarization}
+                                onChange={(v) => setData('model_summarization', v)}
+                                provider={data.provider}
+                                models={models}
+                                allowEmpty
+                            />
+                        </Field>
+                    </section>
+
+                    <section className="bg-white border border-border rounded-lg p-6 space-y-5">
+                        <div>
+                            <h2 className="font-medium text-base">Reasoning</h2>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                Controls thinking / reasoning tokens when the provider supports them (OpenAI reasoning
+                                models, OpenRouter <code className="text-[11px]">reasoning</code> object, Anthropic
+                                extended thinking).
+                            </p>
+                        </div>
+
+                        <Field label="Reasoning effort" error={errors.reasoning_effort}>
+                            <NativeSelect
+                                value={data.reasoning_effort}
+                                onChange={(v) => setData('reasoning_effort', v)}
+                            >
+                                {REASONING_EFFORTS.map((o) => (
+                                    <option key={o.value} value={o.value}>
+                                        {o.label}
+                                    </option>
+                                ))}
+                            </NativeSelect>
+                        </Field>
+
+                        {showReasoningBudget && (
+                            <Field
+                                label="Thinking budget (tokens)"
+                                hint="Anthropic-style max thinking tokens. Leave blank to use a default based on effort."
+                                error={errors.reasoning_max_tokens}
+                            >
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    max={100000}
+                                    placeholder="e.g. 2000"
+                                    value={data.reasoning_max_tokens}
+                                    onChange={(e) =>
+                                        setData(
+                                            'reasoning_max_tokens',
+                                            e.target.value === '' ? '' : parseInt(e.target.value, 10),
+                                        )
+                                    }
+                                />
+                            </Field>
+                        )}
+
+                        {data.reasoning_effort !== 'none' && data.provider !== 'anthropic' && (
+                            <label className="flex items-start gap-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={data.reasoning_exclude}
+                                    onChange={(e) => setData('reasoning_exclude', e.target.checked)}
+                                    className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                                />
+                                <div>
+                                    <p className="text-sm font-medium">Exclude reasoning from response</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        Still uses reasoning tokens internally, but hides them from the returned content
+                                        when the provider supports it.
+                                    </p>
+                                </div>
+                            </label>
+                        )}
+                    </section>
+
                     <section className="bg-white border border-border rounded-lg p-6 space-y-4">
                         <h2 className="font-medium text-base">Feature Toggles</h2>
 
@@ -340,7 +507,6 @@ export default function AIConfig({ aiConfig }: Props) {
                         ))}
                     </section>
 
-                    {/* ── RAG ──────────────────────────────────────────────── */}
                     <section className="bg-white border border-border rounded-lg p-6 space-y-4">
                         <div>
                             <h2 className="font-medium text-base">RAG Settings</h2>

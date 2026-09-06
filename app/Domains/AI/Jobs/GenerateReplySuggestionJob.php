@@ -37,8 +37,8 @@ class GenerateReplySuggestionJob implements ShouldQueue
         try {
             app(AiSettingsService::class)->withWorkspaceCredentials(
                 $conversation->workspace_id,
-                function ($lab, $model) use ($conversation): void {
-                    $agent = new ReplySuggestionAgent($conversation);
+                function ($lab, $model, $providerOptions = []) use ($conversation): void {
+                    $agent = (new ReplySuggestionAgent($conversation))->withProviderOptions($providerOptions);
                     $prompt = 'Please suggest a helpful, professional reply to the latest customer message. Write only the reply body.';
 
                     $channel = new PrivateChannel("conversation.{$conversation->id}");
@@ -57,7 +57,8 @@ class GenerateReplySuggestionJob implements ShouldQueue
                     ]);
 
                     broadcast(new AiSuggestionReady($conversation->id, $content, $suggestion->id));
-                }
+                },
+                task: 'reply_suggestions',
             );
         } catch (\Throwable $e) {
             Log::error('GenerateReplySuggestionJob failed', [

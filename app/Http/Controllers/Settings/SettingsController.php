@@ -121,7 +121,9 @@ class SettingsController extends Controller
         try {
             $aiService->withWorkspaceCredentials(
                 $workspaceId,
-                fn ($lab, $model) => (new SummarizationAgent)->prompt('Reply with the single word: ok', provider: $lab, model: $model),
+                fn ($lab, $model, $providerOptions = []) => (new SummarizationAgent)
+                    ->withProviderOptions($providerOptions)
+                    ->prompt('Reply with the single word: ok', provider: $lab, model: $model),
             );
 
             return response()->json(['ok' => true, 'message' => 'Connection successful — API key is valid.']);
