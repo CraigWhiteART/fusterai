@@ -44,12 +44,12 @@ RULES,
         'name' => 'Order status — fulfilled',
         'always_human' => false,
         'auto_send_allowed' => true,
-        'data_requirements' => ['shopify_order', 'tracking'],
+        'data_requirements' => ['shopify_order', 'tracking', 'tracking_live'],
         'sort_order' => 12,
         'rules' => <<<'RULES'
-- Confirm fulfilment using verified Shopify data.
+- Confirm fulfilment using verified Shopify data, then give the current carrier status and last scan from verified carrier data.
 - Include tracking number and tracking URL only if present in the snapshot.
-- Do not claim a delivery date unless it is in verified data.
+- Do not claim a delivery date unless it is in verified data. An estimated delivery date may be quoted only if the carrier data carries one, and must be described as an estimate.
 RULES,
     ],
     [
@@ -58,14 +58,15 @@ RULES,
         'name' => 'Tracking problem',
         'always_human' => false,
         'auto_send_allowed' => true,
-        'data_requirements' => ['shopify_order', 'tracking'],
+        'data_requirements' => ['shopify_order', 'tracking', 'tracking_live'],
         'sort_order' => 20,
         'rules' => <<<'RULES'
-- Check tracking data first. Quote only the tracking number, URL, and fulfilment status from verified Shopify data.
+- Check carrier tracking data first, then Shopify. Quote only the status, last scan, tracking number and URL as written in verified data.
+- If the carrier has handed the parcel to a domestic carrier, name that carrier and give its tracking number exactly as written.
 - Do not say the parcel is lost unless verified data or knowledge base explicitly supports that conclusion.
 - Do not promise a replacement or refund.
 - Explain expected tracking behaviour only using knowledge base facts.
-- If tracking age exceeds the configured stale threshold, say a human will review and escalate. Do not invent a carrier investigation.
+- If the last carrier scan is older than the configured stale threshold, say a human will review and escalate. Do not invent a carrier investigation.
 RULES,
     ],
     [
@@ -74,14 +75,15 @@ RULES,
         'name' => 'Tracking — no updates',
         'always_human' => false,
         'auto_send_allowed' => true,
-        'data_requirements' => ['shopify_order', 'tracking'],
+        'data_requirements' => ['shopify_order', 'tracking', 'tracking_live'],
         'sort_order' => 21,
         'rules' => <<<'RULES'
-- Check tracking data first.
+- Lead with the last carrier scan and its date, exactly as written in verified carrier data.
+- If there are no carrier scans at all, say tracking has not updated yet — do not infer a delay or a problem.
 - Do not say the parcel is lost unless verified.
 - Do not promise replacement.
 - Explain expected tracking behaviour only using KB facts.
-- Escalate if tracking age exceeds the configured threshold.
+- Escalate if the last scan is older than the configured threshold.
 RULES,
     ],
     [
@@ -90,10 +92,13 @@ RULES,
         'name' => 'Tracking — delivered not received',
         'always_human' => true,
         'auto_send_allowed' => false,
-        'data_requirements' => ['shopify_order', 'tracking'],
+        'data_requirements' => ['shopify_order', 'tracking', 'tracking_live'],
         'sort_order' => 22,
         'rules' => <<<'RULES'
-- Acknowledge the carrier marked the shipment delivered only if that status is in verified data.
+- Acknowledge the carrier marked the shipment delivered only if that status is in verified carrier data, and give the delivery date from that data.
+- If the carrier recorded how the parcel was accepted (signed for, handed over, left at a location), state it exactly as recorded.
+- If the carrier did not record who accepted it, say so plainly. Never assert the customer received it.
+- Never claim a signature image, delivery photo, or GPS proof is available — we do not hold one. A human will request proof of delivery from the carrier if needed.
 - Do not promise a replacement or refund.
 - Ask for the delivery address confirmation and whether neighbours or building reception were checked.
 - Escalate to a human. This is always a human-required case.

@@ -16,6 +16,9 @@ class CommerceSetting extends Model
         'shopify_shop_domain',
         'shopify_access_token',
         'shopify_api_version',
+        'tracking_provider',
+        'tracking_api_key',
+        'tracking_store_uuid',
         'tracking_stale_days',
         'example_edit_threshold',
         'preorder_tags',
@@ -31,6 +34,7 @@ class CommerceSetting extends Model
 
     protected $hidden = [
         'shopify_access_token',
+        'tracking_api_key',
     ];
 
     /** @return BelongsTo<Workspace, $this> */
@@ -45,6 +49,7 @@ class CommerceSetting extends Model
             ['workspace_id' => $workspaceId],
             [
                 'shopify_api_version' => (string) config('commerce-assist.shopify_api_version', '2025-01'),
+                'tracking_provider' => (string) config('commerce-assist.tracking_provider', 'none'),
                 'tracking_stale_days' => (int) config('commerce-assist.tracking_stale_days', 14),
                 'example_edit_threshold' => (int) config('commerce-assist.example_edit_threshold', 25),
                 'preorder_tags' => config('commerce-assist.preorder_tags', ['preorder']),
@@ -91,6 +96,54 @@ class CommerceSetting extends Model
         }
 
         return $domain;
+    }
+
+    public function decryptTrackingApiKey(): ?string
+    {
+        if (blank($this->tracking_api_key)) {
+            return null;
+        }
+
+        try {
+            return Crypt::decryptString($this->tracking_api_key);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    public function trackingKeyIsSet(): bool
+    {
+        return filled($this->tracking_api_key);
+    }
+
+    public function trackingEnabled(): bool
+    {
+        return $this->tracking_provider !== null
+            && $this->tracking_provider !== ''
+            && $this->tracking_provider !== 'none'
+            && filled($this->decryptTrackingApiKey());
+    }
+
+    /**
+     * Track123 keys its Shopify endpoints by the myshopify subdomain. Fall back
+     * to the subdomain of the configured shop so most workspaces never have to
+     * fill this in.
+     */
+    public function trackingStoreUuid(): ?string
+    {
+        $explicit = trim((string) $this->tracking_store_uuid);
+        if ($explicit !== '') {
+            return $explicit;
+        }
+
+        $domain = $this->shopDomain();
+        if ($domain === null) {
+            return null;
+        }
+
+        $subdomain = explode('.', $domain)[0] ?? '';
+
+        return $subdomain !== '' ? $subdomain : null;
     }
 
     /** @return list<string> */

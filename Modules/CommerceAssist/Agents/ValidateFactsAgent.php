@@ -18,7 +18,7 @@ use Laravel\Ai\Promptable;
 #[Model('claude-haiku-4-5-20251001')]
 #[MaxTokens(512)]
 #[Temperature(0)]
-class ValidateFactsAgent implements Agent, HasStructuredOutput, HasProviderOptions
+class ValidateFactsAgent implements Agent, HasProviderOptions, HasStructuredOutput
 {
     use HasConfigurableProviderOptions;
     use Promptable;
@@ -31,7 +31,7 @@ You are a fact checker for customer-support email drafts.
 You receive a proposed reply and a block of verified information.
 
 Return every factual claim in the reply that is not supported by the verified information.
-Unsupported claims include invented dates, tracking numbers, order status, promises of refunds/replacements/shipping, and policy statements not present in the verified knowledge.
+Unsupported claims include invented dates, tracking numbers, order status, carrier scan events, delivery attempts, signatures or proof of delivery, promises of refunds/replacements/shipping, and policy statements not present in the verified knowledge.
 
 Greeting, empathy, and asking for information are not claims.
 If the reply only uses verified facts, return an empty list.

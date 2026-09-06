@@ -10,12 +10,18 @@ use Modules\CommerceAssist\Models\ShopifySnapshot;
 use Modules\CommerceAssist\Services\EditLearningService;
 use Modules\CommerceAssist\Services\GenerationPipeline;
 use Modules\CommerceAssist\Services\LiveFactService;
+use Modules\CommerceAssist\Services\Tracking\TrackingProviderFactory;
+use Modules\CommerceAssist\Services\TrackingLookupService;
 
 class CommerceAssistServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../Config/commerce-assist.php', 'commerce-assist');
+
+        // Singleton so a provider registered with extend() — a test fake, or a
+        // future first-party carrier client — is seen by every resolver.
+        $this->app->singleton(TrackingProviderFactory::class);
     }
 
     public function boot(): void
@@ -44,6 +50,7 @@ class CommerceAssistServiceProvider extends ServiceProvider
 
             $extra['commerceAssist'] = [
                 'shopify' => $snapshot?->payload,
+                'tracking' => app(TrackingLookupService::class)->latestFor($conversation)?->toUiArray(),
                 'generation' => $generation?->toUiArray(),
                 'nominate' => ($generation && $generation->nominated_as_example && ! $generation->added_as_example)
                     ? $generation->toUiArray()

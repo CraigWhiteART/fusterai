@@ -28,6 +28,7 @@ class GenerationPipeline
         private readonly FactValidator $validator,
         private readonly ConfidenceScorer $confidence,
         private readonly LiveFactService $liveFacts,
+        private readonly TrackingLookupService $tracking,
         private readonly AiSettingsService $aiSettings,
     ) {}
 
@@ -51,6 +52,9 @@ class GenerationPipeline
         }
 
         $snapshot = $this->shopify->lookup($conversation);
+        // Preemptive carrier read: null when tracking is off or there is nothing
+        // to look up, which every consumer treats as "no carrier data".
+        $tracking = $this->tracking->lookup($conversation, $snapshot);
         $classification = $this->classify($conversation, $customerMessage, $snapshot);
         [$intent, $subtype] = $this->resolveIntents($conversation->workspace_id, $classification);
 
@@ -86,10 +90,12 @@ class GenerationPipeline
             $hasPhotos,
             $settings->tracking_stale_days,
             $liveFacts,
+            $tracking,
         );
 
-        $verifiedBlock = "VERIFIED CUSTOMER DATA AND SHOPIFY DATA AND KNOWLEDGE AND CURRENT BUSINESS FACTS\n"
+        $verifiedBlock = "VERIFIED CUSTOMER DATA AND SHOPIFY DATA AND CARRIER DATA AND KNOWLEDGE AND CURRENT BUSINESS FACTS\n"
             .$this->context->formatShopify($snapshot)."\n"
+            .$this->context->formatTracking($tracking)."\n"
             .$this->context->formatLiveFacts($liveFacts)."\n"
             .$kbDocs->map(fn ($doc) => $doc->title.': '.PlainText::from($doc->content))->implode("\n");
 
@@ -114,6 +120,7 @@ class GenerationPipeline
             $claims,
             $exampleRows->all(),
             $kbDocs->all(),
+            $tracking,
         );
 
         $generation = Generation::create([
@@ -121,6 +128,7 @@ class GenerationPipeline
             'conversation_id' => $conversation->id,
             'customer_thread_id' => $customerThread?->id,
             'shopify_snapshot_id' => $snapshot->id,
+            'tracking_snapshot_id' => $tracking?->id,
             'ai_draft' => $draft,
             'intent' => $intent->slug,
             'subtype' => $subtype?->slug,

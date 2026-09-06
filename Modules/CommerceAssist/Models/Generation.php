@@ -19,6 +19,7 @@ class Generation extends Model
         'reply_thread_id',
         'ai_suggestion_id',
         'shopify_snapshot_id',
+        'tracking_snapshot_id',
         'ai_draft',
         'final_response',
         'percent_changed',

@@ -3,11 +3,12 @@
 namespace Modules\CommerceAssist\Services;
 
 use App\Domains\Conversation\Models\Conversation;
+use Illuminate\Support\Collection;
 use Modules\CommerceAssist\Models\ApprovedResponse;
 use Modules\CommerceAssist\Models\CommerceIntent;
 use Modules\CommerceAssist\Models\ShopifySnapshot;
+use Modules\CommerceAssist\Models\TrackingSnapshot;
 use Modules\CommerceAssist\Support\PlainText;
-use Illuminate\Support\Collection;
 
 class ContextBuilder
 {
@@ -29,13 +30,15 @@ class ContextBuilder
         bool $hasPhotos,
         ?int $trackingStaleDays = null,
         ?Collection $liveFacts = null,
+        ?TrackingSnapshot $tracking = null,
     ): array {
         $liveFacts ??= collect();
         $shopify = $this->formatShopify($snapshot);
+        $carrier = $this->formatTracking($tracking);
         $customer = $this->formatCustomer($conversation, $hasPhotos);
         $kb = $this->formatKnowledge($kbDocs);
         $facts = $this->formatLiveFacts($liveFacts);
-        $rules = $this->formatRules($intent, $subtype, $snapshot, $trackingStaleDays);
+        $rules = $this->formatRules($intent, $subtype, $snapshot, $trackingStaleDays, $tracking);
         $exampleBlock = $this->formatExamples($examples);
         $subtypeLabel = $classification['subtype'] ?? $subtype?->slug ?? 'none';
 
@@ -64,6 +67,9 @@ VERIFIED CUSTOMER DATA
 VERIFIED SHOPIFY DATA
 {$shopify}
 
+VERIFIED CARRIER TRACKING DATA
+{$carrier}
+
 CURRENT BUSINESS FACTS
 {$facts}
 
@@ -85,6 +91,9 @@ WRITING INSTRUCTIONS
 - Never copy customer-specific facts from examples.
 - If tracking is missing, say tracking is not on the order — do not invent a number.
 - If Shopify data was not found, do not pretend an order exists.
+- Carrier scan history is verified data. Quote the status and last scan only as written above.
+- Never describe a scan, a delivery attempt, or a signature that is not in the carrier data.
+- If the carrier data says not found, say tracking has no updates yet — do not infer the parcel is lost or stuck.
 PROMPT;
 
         $user = 'Write the reply body for the customer message above.';
@@ -94,6 +103,7 @@ PROMPT;
             'user' => $user,
             'sources' => [
                 'shopify' => $this->shopifySourceLabel($snapshot),
+                'tracking' => $this->trackingSourceLabel($tracking),
                 'facts' => $liveFacts->map(fn ($fact) => $fact->title ?: mb_substr(PlainText::from($fact->body), 0, 60))->values()->all(),
                 'knowledge' => $kbDocs->map(fn ($doc) => $doc->title)->values()->all(),
                 'examples' => $examples->map(fn (ApprovedResponse $example) => trim(($example->intent ?: 'example').' #'.$example->id))->values()->all(),
@@ -146,6 +156,80 @@ PROMPT;
         $lines[] = $products !== [] ? implode("\n", $products) : '- none listed';
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * The carrier block. Deliberately terse and label-value shaped: the model
+     * should quote these values, not paraphrase a narrative.
+     */
+    public function formatTracking(?TrackingSnapshot $tracking): string
+    {
+        if ($tracking === null) {
+            return 'No carrier tracking source configured. Use Shopify fulfilment data only, and do not describe carrier scans.';
+        }
+
+        if (! $tracking->found()) {
+            $reason = $tracking->payload['reason'] ?? $tracking->payload['status_raw'] ?? 'The carrier has no record for this number yet.';
+
+            return 'No verified carrier data. Reason: '.$reason
+                ."\nDo not infer from this that the parcel is lost, stuck, or delayed.";
+        }
+
+        $payload = $tracking->payload ?? [];
+
+        $lines = [
+            'carrier: '.$this->val($payload['carrier_name'] ?? $tracking->carrier_name),
+            'carrier_status: '.$this->val($payload['status_label'] ?? null),
+            'carrier_sub_status: '.$this->val($payload['sub_status'] ?? null),
+            'last_scan: '.$this->val($payload['last_event'] ?? null),
+            'last_scan_at: '.$this->val($payload['last_event_at'] ?? null),
+            'days_since_last_scan: '.$this->val($payload['days_since_last_scan'] ?? null),
+            'estimated_delivery: '.$this->val($payload['estimated_delivery_at'] ?? null),
+            'delivered_at: '.$this->val($payload['delivered_at'] ?? null),
+            'last_mile_carrier: '.$this->val($payload['last_mile_carrier'] ?? null),
+            'last_mile_tracking_number: '.$this->val($payload['last_mile_tracking_number'] ?? null),
+        ];
+
+        $proof = $tracking->proof();
+        if ($proof !== null) {
+            $lines[] = 'proof_of_delivery: '.$this->val($proof['label'] ?? null);
+            $lines[] = 'proof_detail: '.$this->val($proof['detail'] ?? null);
+            $lines[] = 'proof_location: '.$this->val($proof['location'] ?? null);
+        }
+
+        $events = [];
+        foreach (array_slice($payload['events'] ?? [], 0, 8) as $event) {
+            $events[] = sprintf(
+                '- %s: %s%s%s',
+                $event['occurred_at'] ?? 'unknown time',
+                $event['description'] ?? 'no description',
+                filled($event['location'] ?? null) ? ' ('.$event['location'].')' : '',
+                ($event['last_mile'] ?? false) ? ' [last mile]' : '',
+            );
+        }
+        $lines[] = 'recent_scans:';
+        $lines[] = $events !== [] ? implode("\n", $events) : '- none recorded';
+
+        return implode("\n", $lines);
+    }
+
+    public function trackingSourceLabel(?TrackingSnapshot $tracking): string
+    {
+        if ($tracking === null) {
+            return 'No carrier source';
+        }
+
+        if (! $tracking->found()) {
+            return 'Carrier has no record';
+        }
+
+        $parts = array_filter([
+            $tracking->carrier_name,
+            $tracking->trackingStatus()->label(),
+            $tracking->days_since_last_scan !== null ? "last scan {$tracking->days_since_last_scan}d ago" : null,
+        ]);
+
+        return implode(' — ', $parts);
     }
 
     public function shopifySourceLabel(ShopifySnapshot $snapshot): string
@@ -208,16 +292,43 @@ PROMPT;
         })->implode("\n\n---\n\n");
     }
 
-    private function formatRules(CommerceIntent $intent, ?CommerceIntent $subtype, ShopifySnapshot $snapshot, ?int $trackingStaleDays): string
-    {
+    private function formatRules(
+        CommerceIntent $intent,
+        ?CommerceIntent $subtype,
+        ShopifySnapshot $snapshot,
+        ?int $trackingStaleDays,
+        ?TrackingSnapshot $tracking = null,
+    ): string {
         $blocks = [$intent->name.":\n".$intent->rules];
         if ($subtype && $subtype->id !== $intent->id) {
             $blocks[] = $subtype->name.":\n".$subtype->rules;
         }
 
-        $age = $snapshot->payload['tracking_age_days'] ?? null;
-        if ($trackingStaleDays && is_numeric($age) && (int) $age >= $trackingStaleDays) {
-            $blocks[] = "Tracking age is {$age} days, which exceeds the configured threshold of {$trackingStaleDays} days. Escalate rather than claiming the parcel is lost.";
+        // Prefer days since the last carrier scan — the fulfilment age only says
+        // when the label was created, which is not what the customer is asking.
+        $scanAge = $tracking?->found() ? $tracking->days_since_last_scan : null;
+        $age = $scanAge ?? ($snapshot->payload['tracking_age_days'] ?? null);
+        $ageLabel = $scanAge !== null ? 'The carrier last scanned this parcel' : 'Tracking age is';
+
+        if ($trackingStaleDays && is_numeric($age) && (int) $age >= $trackingStaleDays && ! ($tracking?->isDelivered() ?? false)) {
+            $blocks[] = "{$ageLabel} {$age} days ago, which exceeds the configured threshold of {$trackingStaleDays} days. Escalate rather than claiming the parcel is lost.";
+        }
+
+        if ($tracking?->found()) {
+            if ($tracking->needsAttention()) {
+                $blocks[] = 'The carrier has flagged this shipment ('.$tracking->trackingStatus()->label().'). State the carrier status plainly, do not speculate about the cause, and say a human is reviewing it.';
+            }
+
+            if ($tracking->hasLastMileHandoff()) {
+                $blocks[] = 'This parcel has been handed to a domestic carrier ('.$tracking->last_mile_carrier.'). You may give the customer the last-mile tracking number shown in the carrier data, but only exactly as written.';
+            }
+
+            $proof = $tracking->proof();
+            if ($proof !== null) {
+                $blocks[] = $tracking->proofIsAttributable()
+                    ? 'The carrier recorded how the parcel was accepted: '.$proof['label'].'. You may state this. Do not claim a signature image or photo is available — we do not have one.'
+                    : 'The carrier marked this delivered but did not record who accepted it ('.$proof['label'].'). Do not assert the customer received it. Do not claim a signature exists.';
+            }
         }
 
         return implode("\n\n", $blocks);

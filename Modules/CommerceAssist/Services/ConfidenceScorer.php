@@ -5,6 +5,7 @@ namespace Modules\CommerceAssist\Services;
 use Modules\CommerceAssist\Models\CommerceIntent;
 use Modules\CommerceAssist\Models\CommerceSetting;
 use Modules\CommerceAssist\Models\ShopifySnapshot;
+use Modules\CommerceAssist\Models\TrackingSnapshot;
 
 class ConfidenceScorer
 {
@@ -22,6 +23,7 @@ class ConfidenceScorer
         array $unsupportedClaims,
         array $examples,
         array $kbDocs,
+        ?TrackingSnapshot $tracking = null,
     ): array {
         $score = 0.9;
         $requiresHuman = $intent->always_human || ($subtype?->always_human ?? false);
@@ -37,6 +39,31 @@ class ConfidenceScorer
 
         if (in_array('tracking', $requirements, true) && empty($snapshot->payload['tracking_number'] ?? null)) {
             $score -= 0.1;
+        }
+
+        if (in_array('tracking_live', $requirements, true) && ! ($tracking?->found() ?? false)) {
+            // Answering "where is it" without carrier state is guesswork.
+            $score -= 0.1;
+        }
+
+        if ($tracking?->found()) {
+            // A carrier exception or failed attempt needs a person, not a
+            // reassuring paragraph — the next step is usually a claim.
+            if ($tracking->needsAttention()) {
+                $score -= 0.2;
+                $requiresHuman = true;
+            }
+
+            if ($tracking->isStalled($settings->tracking_stale_days)) {
+                $score -= 0.15;
+                $requiresHuman = true;
+            }
+
+            // Delivered but nobody recorded taking it: the classic
+            // delivered-not-received dispute. Never auto-send into that.
+            if ($tracking->isDelivered() && ! $tracking->proofIsAttributable()) {
+                $requiresHuman = true;
+            }
         }
 
         if ($unsupportedClaims !== []) {

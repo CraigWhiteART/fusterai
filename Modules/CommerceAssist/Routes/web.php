@@ -34,6 +34,7 @@ Route::middleware(['auth', 'module.active:CommerceAssist'])->group(function () {
 
     Route::get('/commerce-assist/conversations/{conversation}', [ConversationContextController::class, 'show'])->name('commerce-assist.context');
     Route::post('/commerce-assist/conversations/{conversation}/shopify-refresh', [ConversationContextController::class, 'refreshShopify'])->name('commerce-assist.shopify-refresh');
+    Route::post('/commerce-assist/conversations/{conversation}/tracking-refresh', [ConversationContextController::class, 'refreshTracking'])->name('commerce-assist.tracking-refresh');
     Route::post('/commerce-assist/threads/{thread}/example', [ExampleController::class, 'fromThread'])->name('commerce-assist.thread-example');
     Route::post('/commerce-assist/generations/{generation}/example', [ExampleController::class, 'fromGeneration'])->name('commerce-assist.generation-example');
 });

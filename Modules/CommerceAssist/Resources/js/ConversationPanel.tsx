@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCwIcon, ShoppingBagIcon } from 'lucide-react';
+import { AlertTriangleIcon, PackageIcon, RefreshCwIcon, ShoppingBagIcon } from 'lucide-react';
 import { csrfHeaders } from './csrf';
 
 interface Generation {
@@ -13,6 +13,7 @@ interface Generation {
     unsupported_claims?: string[];
     sources?: {
         shopify?: string;
+        tracking?: string;
         facts?: string[];
         knowledge?: string[];
         examples?: string[];
@@ -36,6 +37,45 @@ interface ShopifyPayload {
     products?: { title?: string; variant?: string; quantity?: number; preorder?: boolean | null }[];
 }
 
+interface TrackingEvent {
+    occurred_at?: string | null;
+    description?: string | null;
+    location?: string | null;
+    last_mile?: boolean;
+}
+
+interface TrackingPayload {
+    found?: boolean;
+    reason?: string | null;
+    provider?: string;
+    status?: string;
+    status_label?: string | null;
+    sub_status?: string | null;
+    carrier_name?: string | null;
+    tracking_number?: string | null;
+    tracking_url?: string | null;
+    last_event?: string | null;
+    last_event_at?: string | null;
+    days_since_last_scan?: number | null;
+    delivered_at?: string | null;
+    estimated_delivery_at?: string | null;
+    needs_attention?: boolean;
+    last_mile_handoff?: boolean;
+    last_mile_carrier?: string | null;
+    last_mile_tracking_number?: string | null;
+    last_mile_tracking_url?: string | null;
+    proof_of_delivery?: {
+        type?: string;
+        label?: string;
+        detail?: string | null;
+        location?: string | null;
+        attributable?: boolean;
+    } | null;
+    events?: TrackingEvent[];
+    fetched_at?: string | null;
+    error?: string | null;
+}
+
 interface LiveFact {
     id: number;
     title?: string | null;
@@ -44,6 +84,7 @@ interface LiveFact {
 
 interface CommerceAssistPayload {
     shopify?: ShopifyPayload | null;
+    tracking?: TrackingPayload | null;
     generation?: Generation | null;
     liveFacts?: LiveFact[];
 }
@@ -60,6 +101,7 @@ interface Props {
 export default function ConversationPanel({ conversation, commerceAssist }: Props) {
     const [data, setData] = useState<CommerceAssistPayload>(commerceAssist ?? {});
     const [refreshing, setRefreshing] = useState(false);
+    const [refreshingTracking, setRefreshingTracking] = useState(false);
 
     const load = useCallback(async () => {
         if (!conversation?.id) return;
@@ -99,7 +141,25 @@ export default function ConversationPanel({ conversation, commerceAssist }: Prop
         }
     }
 
+    async function refreshTracking() {
+        if (!conversation?.id) return;
+        setRefreshingTracking(true);
+        try {
+            const res = await fetch(`/commerce-assist/conversations/${conversation.id}/tracking-refresh`, {
+                method: 'POST',
+                headers: csrfHeaders(),
+            });
+            if (res.ok) {
+                const json = await res.json();
+                setData((prev) => ({ ...prev, tracking: json.tracking }));
+            }
+        } finally {
+            setRefreshingTracking(false);
+        }
+    }
+
     const shopify = data.shopify;
+    const tracking = data.tracking;
     const generation = data.generation;
     const liveFacts = data.liveFacts ?? [];
 
@@ -156,6 +216,71 @@ export default function ConversationPanel({ conversation, commerceAssist }: Prop
                 <p className="text-xs text-muted-foreground">{shopify?.reason ?? 'No Shopify match yet.'}</p>
             )}
 
+            {tracking && (
+                <div className="space-y-1.5 pt-2 border-t border-border">
+                    <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                            <PackageIcon className="h-3 w-3" /> Carrier
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => void refreshTracking()}
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Refresh carrier tracking"
+                        >
+                            <RefreshCwIcon className={`h-3 w-3 ${refreshingTracking ? 'animate-spin' : ''}`} />
+                        </button>
+                    </div>
+
+                    {tracking.found ? (
+                        <div className="space-y-1 text-xs">
+                            <p className="font-medium">
+                                {tracking.status_label ?? 'Unknown'}
+                                {tracking.carrier_name ? ` · ${tracking.carrier_name}` : ''}
+                            </p>
+                            {tracking.last_event && (
+                                <p className="text-muted-foreground">
+                                    {tracking.last_event}
+                                    {tracking.days_since_last_scan != null ? ` · ${tracking.days_since_last_scan}d ago` : ''}
+                                </p>
+                            )}
+                            {tracking.estimated_delivery_at && (
+                                <p className="text-muted-foreground">Est. delivery {tracking.estimated_delivery_at}</p>
+                            )}
+                            {tracking.last_mile_handoff && (
+                                <p>
+                                    <span className="text-muted-foreground">Last mile: </span>
+                                    {tracking.last_mile_carrier ?? 'domestic carrier'}
+                                    {tracking.last_mile_tracking_number ? ` · ${tracking.last_mile_tracking_number}` : ''}
+                                </p>
+                            )}
+                            {tracking.proof_of_delivery && (
+                                <p className={tracking.proof_of_delivery.attributable ? '' : 'text-warning'}>
+                                    <span className="text-muted-foreground">Proof: </span>
+                                    {tracking.proof_of_delivery.label}
+                                    {tracking.proof_of_delivery.detail ? ` — ${tracking.proof_of_delivery.detail}` : ''}
+                                </p>
+                            )}
+                            {tracking.needs_attention && (
+                                <p className="text-[11px] text-destructive bg-destructive/10 rounded px-1.5 py-1 flex items-center gap-1">
+                                    <AlertTriangleIcon className="h-3 w-3 shrink-0" />
+                                    Carrier flagged this shipment
+                                </p>
+                            )}
+                            {(tracking.events ?? []).slice(0, 3).map((event, i) => (
+                                <p key={i} className="text-[11px] text-muted-foreground">
+                                    {event.occurred_at?.slice(0, 10) ?? '—'} {event.description}
+                                    {event.location ? ` (${event.location})` : ''}
+                                    {event.last_mile ? ' · last mile' : ''}
+                                </p>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-xs text-muted-foreground">{tracking.error ?? tracking.reason ?? 'No carrier record yet.'}</p>
+                    )}
+                </div>
+            )}
+
             {liveFacts.length > 0 && (
                 <div className="space-y-1.5 pt-2 border-t border-border">
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Current facts</p>
@@ -173,6 +298,10 @@ export default function ConversationPanel({ conversation, commerceAssist }: Prop
                     <p className="text-xs">
                         <span className="text-muted-foreground">Shopify: </span>
                         {generation.sources?.shopify ?? '—'}
+                    </p>
+                    <p className="text-xs">
+                        <span className="text-muted-foreground">Carrier: </span>
+                        {generation.sources?.tracking ?? '—'}
                     </p>
                     <p className="text-xs">
                         <span className="text-muted-foreground">Facts: </span>
@@ -195,8 +324,7 @@ export default function ConversationPanel({ conversation, commerceAssist }: Prop
                     )}
                     {!generation.validator_passed && (
                         <div className="text-[11px] text-destructive bg-destructive/10 rounded px-1.5 py-1">
-                            Unsupported claims:{' '}
-                            {(generation.unsupported_claims ?? []).join(' · ') || 'flagged'}
+                            Unsupported claims: {(generation.unsupported_claims ?? []).join(' · ') || 'flagged'}
                         </div>
                     )}
                 </div>

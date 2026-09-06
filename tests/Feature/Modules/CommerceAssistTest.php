@@ -23,15 +23,17 @@ use Modules\CommerceAssist\Agents\ClassifyIntentAgent;
 use Modules\CommerceAssist\Agents\ValidateFactsAgent;
 use Modules\CommerceAssist\Agents\WriteReplyAgent;
 use Modules\CommerceAssist\Jobs\IndexApprovedResponseJob;
+use Modules\CommerceAssist\Jobs\RefreshDraftsForFactJob;
 use Modules\CommerceAssist\Models\ApprovedResponse;
 use Modules\CommerceAssist\Models\CommerceIntent;
 use Modules\CommerceAssist\Models\CommerceSetting;
-use Modules\CommerceAssist\Jobs\RefreshDraftsForFactJob;
 use Modules\CommerceAssist\Models\Generation;
 use Modules\CommerceAssist\Models\LiveFact;
 use Modules\CommerceAssist\Models\ReplayRun;
 use Modules\CommerceAssist\Models\ShopifySnapshot;
+use Modules\CommerceAssist\Models\TrackingSnapshot;
 use Modules\CommerceAssist\Providers\CommerceAssistServiceProvider;
+use Modules\CommerceAssist\Services\ConfidenceScorer;
 use Modules\CommerceAssist\Services\ContextBuilder;
 use Modules\CommerceAssist\Services\EditLearningService;
 use Modules\CommerceAssist\Services\ExampleService;
@@ -39,6 +41,7 @@ use Modules\CommerceAssist\Services\GenerationPipeline;
 use Modules\CommerceAssist\Services\IntentCatalog;
 use Modules\CommerceAssist\Services\LiveFactService;
 use Modules\CommerceAssist\Services\ShopifyLookupService;
+use Modules\CommerceAssist\Services\TrackingLookupService;
 use Modules\CommerceAssist\Support\PlainText;
 
 beforeEach(function () {
@@ -202,7 +205,7 @@ test('context builder separates knowledge from approved examples and forbids cop
     IntentCatalog::ensureForWorkspace($this->workspace->id);
     $intent = CommerceIntent::where('workspace_id', $this->workspace->id)->where('slug', 'tracking_problem')->first();
 
-    $snapshot = new \Modules\CommerceAssist\Models\ShopifySnapshot([
+    $snapshot = new ShopifySnapshot([
         'payload' => [
             'found' => true,
             'order_number' => 'SD8421',
@@ -213,12 +216,14 @@ test('context builder separates knowledge from approved examples and forbids cop
     ]);
 
     $example = new ApprovedResponse([
-        'id' => 31,
         'customer_message' => 'Where is SD1000?',
         'final_reply' => 'SD1000 shipped yesterday with tracking 1Z999.',
         'intent' => 'tracking_problem',
         'subtype' => 'tracking.no_updates',
     ]);
+    // Assigned directly: `id` is not fillable, so passing it to the constructor
+    // silently drops it and the source label renders as a bare "#".
+    $example->id = 31;
 
     $kb = new KbDocument(['id' => 1, 'title' => 'US Duties Policy', 'content' => 'Customers pay import duties.']);
 
@@ -626,3 +631,400 @@ test('retired live facts are not applied to new drafts', function () {
     expect($applied)->toHaveCount(0);
 });
 
+// ---------------------------------------------------------------------------
+// Carrier tracking
+// ---------------------------------------------------------------------------
+
+function enableTrack123(): void
+{
+    CommerceSetting::forWorkspace(test()->workspace->id)->update([
+        'shopify_shop_domain' => 'test-shop.myshopify.com',
+        'shopify_access_token' => Crypt::encryptString('shpat_test'),
+        'tracking_provider' => 'track123',
+        'tracking_api_key' => Crypt::encryptString('t123_secret'),
+    ]);
+}
+
+function shopifySnapshotWithTracking(array $overrides = []): ShopifySnapshot
+{
+    return ShopifySnapshot::create([
+        'workspace_id' => test()->workspace->id,
+        'conversation_id' => test()->conversation->id,
+        'customer_email' => 'buyer@example.com',
+        'shopify_order_id' => 'gid://shopify/Order/99',
+        'order_number' => 'SD8421',
+        'payload' => array_merge([
+            'found' => true,
+            'order_number' => 'SD8421',
+            'shopify_order_id' => 'gid://shopify/Order/99',
+            'tracking_number' => '4PX00112233',
+            'tracking_company' => '4PX',
+            'shipping_country' => 'Australia',
+        ], $overrides),
+        'fetched_at' => now(),
+    ]);
+}
+
+/** Mirrors the Track123 Shopify App API order payload. */
+function track123OrderPayload(array $fulfillment = []): array
+{
+    return [
+        'order_name' => '#SD8421',
+        'order_number' => 8421,
+        'order_id' => 99,
+        'status' => 'open',
+        'tracking_link' => 'https://track.example.test/SD8421',
+        'fulfillments' => [array_merge([
+            'tracking_company' => '4PX',
+            'tracking_number' => '4PX00112233',
+            'carrier_code' => '4px',
+            'transit_status' => 'Delivered',
+            'transit_sub_status' => 'Sign by customer',
+            'last_event' => 'Delivered, signed by customer',
+            'last_event_time' => now()->subDays(2)->toIso8601String(),
+            'courier' => [
+                'code' => '4px',
+                'name' => '4PX Express',
+                'query_link' => 'https://track.4px.com',
+            ],
+            'tracking_details' => [[
+                'event_time' => now()->subDays(2)->toIso8601String(),
+                'event_time_utc' => now()->subDays(2)->toIso8601String(),
+                'event_detail' => 'Delivered, signed by customer',
+                'event_location' => 'Sydney NSW',
+            ]],
+            'last_mile_info' => [
+                'lm_track_no' => 'AP99887766',
+                'lm_track_no_provider_code' => 'auspost',
+                'lm_track_no_provider_name' => 'Australia Post',
+                'details' => [[
+                    'event_time_utc' => now()->subDays(3)->toIso8601String(),
+                    'event_detail' => 'Out for delivery',
+                    'event_location' => 'Sydney NSW',
+                ]],
+            ],
+        ], $fulfillment)],
+    ];
+}
+
+test('track123 lookup normalises status, last mile handoff and proof of delivery', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(track123OrderPayload())]);
+
+    $tracking = app(TrackingLookupService::class)->lookup(
+        $this->conversation->load(['customer', 'threads']),
+        shopifySnapshotWithTracking(),
+    );
+
+    expect($tracking)->not->toBeNull()
+        ->and($tracking->found())->toBeTrue()
+        ->and($tracking->status)->toBe('delivered')
+        ->and($tracking->carrier_name)->toBe('4PX Express')
+        ->and($tracking->last_mile_carrier)->toBe('Australia Post')
+        ->and($tracking->last_mile_tracking_number)->toBe('AP99887766')
+        ->and($tracking->days_since_last_scan)->toBe(2)
+        ->and($tracking->proof()['type'])->toBe('signature')
+        ->and($tracking->proofIsAttributable())->toBeTrue()
+        // Both legs of the journey are kept, flagged by which carrier scanned.
+        ->and(collect($tracking->payload['events'])->pluck('last_mile')->all())->toContain(true, false);
+});
+
+test('track123 uses the numeric shopify order id rather than the graphql gid', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(track123OrderPayload())]);
+
+    app(TrackingLookupService::class)->lookup(
+        $this->conversation->load(['customer', 'threads']),
+        shopifySnapshotWithTracking(),
+    );
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/test-shop/orders/99.json')
+        && $request->hasHeader('X-Api-Key', 't123_secret'));
+});
+
+test('carrier lookup is skipped entirely when no provider is configured', function () {
+    $tracking = app(TrackingLookupService::class)->lookup(
+        $this->conversation->load(['customer', 'threads']),
+        shopifySnapshotWithTracking(),
+    );
+
+    expect($tracking)->toBeNull();
+});
+
+test('a stored carrier reading is reused inside the freshness window', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(track123OrderPayload())]);
+
+    $conversation = $this->conversation->load(['customer', 'threads']);
+    $snapshot = shopifySnapshotWithTracking();
+
+    $first = app(TrackingLookupService::class)->lookup($conversation, $snapshot);
+    $second = app(TrackingLookupService::class)->lookup($conversation, $snapshot);
+
+    expect($second->id)->toBe($first->id)
+        ->and(TrackingSnapshot::count())->toBe(1);
+
+    $forced = app(TrackingLookupService::class)->lookup($conversation, $snapshot, force: true);
+
+    expect($forced->id)->not->toBe($first->id);
+});
+
+test('carrier lookup failure is recorded without breaking the snapshot', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response('boom', 500)]);
+
+    $tracking = app(TrackingLookupService::class)->lookup(
+        $this->conversation->load(['customer', 'threads']),
+        shopifySnapshotWithTracking(),
+    );
+
+    expect($tracking->found())->toBeFalse()
+        ->and($tracking->error)->not->toBeNull();
+});
+
+test('delivered without an attributable signature requires a human', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(track123OrderPayload([
+        'transit_sub_status' => 'Delivered to the front door',
+        'last_event' => 'Delivered to the front door',
+        'tracking_details' => [[
+            'event_time_utc' => now()->subDay()->toIso8601String(),
+            'event_detail' => 'Delivered to the front door',
+            'event_location' => 'Sydney NSW',
+        ]],
+    ]))]);
+
+    $tracking = app(TrackingLookupService::class)->lookup(
+        $this->conversation->load(['customer', 'threads']),
+        shopifySnapshotWithTracking(),
+    );
+
+    expect($tracking->proof()['type'])->toBe('left_at_location')
+        ->and($tracking->proofIsAttributable())->toBeFalse();
+
+    IntentCatalog::ensureForWorkspace($this->workspace->id);
+    $intent = CommerceIntent::where('workspace_id', $this->workspace->id)->where('slug', 'tracking_problem')->first();
+
+    $score = app(ConfidenceScorer::class)->score(
+        CommerceSetting::forWorkspace($this->workspace->id),
+        $intent,
+        null,
+        ShopifySnapshot::latest('id')->first(),
+        [],
+        [],
+        [],
+        $tracking,
+    );
+
+    expect($score['requires_human'])->toBeTrue()
+        ->and($score['safe_to_send'])->toBeFalse();
+});
+
+test('a stalled parcel escalates on last scan age rather than fulfilment age', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(track123OrderPayload([
+        'transit_status' => 'In transit',
+        'transit_sub_status' => null,
+        'last_event' => 'Departed facility',
+        'last_event_time' => now()->subDays(30)->toIso8601String(),
+        'tracking_details' => [[
+            'event_time_utc' => now()->subDays(30)->toIso8601String(),
+            'event_detail' => 'Departed facility',
+            'event_location' => 'Shenzhen',
+        ]],
+        'last_mile_info' => [],
+    ]))]);
+
+    $settings = CommerceSetting::forWorkspace($this->workspace->id);
+    $tracking = app(TrackingLookupService::class)->lookup(
+        $this->conversation->load(['customer', 'threads']),
+        shopifySnapshotWithTracking(),
+    );
+
+    expect($tracking->days_since_last_scan)->toBe(30)
+        ->and($tracking->isStalled($settings->tracking_stale_days))->toBeTrue();
+
+    IntentCatalog::ensureForWorkspace($this->workspace->id);
+    $intent = CommerceIntent::where('workspace_id', $this->workspace->id)->where('slug', 'tracking_problem')->first();
+
+    $score = app(ConfidenceScorer::class)->score(
+        $settings,
+        $intent,
+        null,
+        ShopifySnapshot::latest('id')->first(),
+        [],
+        [],
+        [],
+        $tracking,
+    );
+
+    expect($score['requires_human'])->toBeTrue();
+});
+
+test('a carrier exception always requires a human', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(track123OrderPayload([
+        'transit_status' => 'Exception',
+        'transit_sub_status' => 'Returned to sender',
+        'last_event' => 'Returned to sender',
+        'last_event_time' => now()->subDay()->toIso8601String(),
+    ]))]);
+
+    $tracking = app(TrackingLookupService::class)->lookup(
+        $this->conversation->load(['customer', 'threads']),
+        shopifySnapshotWithTracking(),
+    );
+
+    IntentCatalog::ensureForWorkspace($this->workspace->id);
+    $intent = CommerceIntent::where('workspace_id', $this->workspace->id)->where('slug', 'tracking_problem')->first();
+
+    $score = app(ConfidenceScorer::class)->score(
+        CommerceSetting::forWorkspace($this->workspace->id),
+        $intent,
+        null,
+        ShopifySnapshot::latest('id')->first(),
+        [],
+        [],
+        [],
+        $tracking,
+    );
+
+    expect($tracking->needsAttention())->toBeTrue()
+        ->and($score['requires_human'])->toBeTrue();
+});
+
+test('the prompt carries verified carrier data and forbids inventing scans', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(track123OrderPayload())]);
+
+    $conversation = $this->conversation->load(['customer', 'threads']);
+    $tracking = app(TrackingLookupService::class)->lookup($conversation, shopifySnapshotWithTracking());
+
+    IntentCatalog::ensureForWorkspace($this->workspace->id);
+    $intent = CommerceIntent::where('workspace_id', $this->workspace->id)->where('slug', 'tracking_problem')->first();
+
+    $built = app(ContextBuilder::class)->build(
+        $conversation,
+        'Where is my parcel?',
+        ShopifySnapshot::latest('id')->first(),
+        ['intent' => 'tracking_problem', 'subtype' => 'tracking_problem'],
+        $intent,
+        $intent,
+        collect(),
+        collect(),
+        false,
+        14,
+        collect(),
+        $tracking,
+    );
+
+    expect($built['system'])
+        ->toContain('VERIFIED CARRIER TRACKING DATA')
+        ->toContain('Australia Post')
+        ->toContain('AP99887766')
+        ->toContain('Never describe a scan, a delivery attempt, or a signature that is not in the carrier data')
+        ->and($built['sources']['tracking'])->toContain('4PX Express');
+});
+
+test('with no carrier source the prompt says so instead of implying a problem', function () {
+    $block = app(ContextBuilder::class)->formatTracking(null);
+
+    expect($block)->toContain('No carrier tracking source configured')
+        ->and($block)->toContain('do not describe carrier scans');
+});
+
+test('a carrier with no record must not be read as a lost parcel', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(null, 404)]);
+
+    $tracking = app(TrackingLookupService::class)->lookup(
+        $this->conversation->load(['customer', 'threads']),
+        shopifySnapshotWithTracking(),
+    );
+
+    expect($tracking->found())->toBeFalse()
+        ->and(app(ContextBuilder::class)->formatTracking($tracking))
+        ->toContain('Do not infer from this that the parcel is lost');
+});
+
+test('admins can select a tracking provider and the key is stored encrypted', function () {
+    $this->actingAs($this->admin)
+        ->post('/settings/commerce-assist', [
+            'shopify_shop_domain' => 'demo.myshopify.com',
+            'shopify_api_version' => '2025-01',
+            'tracking_provider' => 'track123',
+            'tracking_api_key' => 't123_secret',
+            'tracking_stale_days' => 10,
+            'example_edit_threshold' => 30,
+            'preorder_tags' => 'preorder',
+            'draft_only' => true,
+        ])
+        ->assertRedirect();
+
+    $settings = CommerceSetting::forWorkspace($this->workspace->id);
+
+    expect($settings->tracking_provider)->toBe('track123')
+        ->and($settings->tracking_api_key)->not->toBe('t123_secret')
+        ->and($settings->decryptTrackingApiKey())->toBe('t123_secret')
+        ->and($settings->trackingEnabled())->toBeTrue()
+        // Falls back to the Shopify subdomain so most stores never set this.
+        ->and($settings->trackingStoreUuid())->toBe('demo');
+});
+
+test('switching the tracking provider off clears the stored key', function () {
+    enableTrack123();
+
+    $this->actingAs($this->admin)
+        ->post('/settings/commerce-assist', [
+            'shopify_shop_domain' => 'demo.myshopify.com',
+            'shopify_api_version' => '2025-01',
+            'tracking_provider' => 'none',
+            'tracking_stale_days' => 10,
+            'example_edit_threshold' => 30,
+            'preorder_tags' => 'preorder',
+            'draft_only' => true,
+        ])
+        ->assertRedirect();
+
+    $settings = CommerceSetting::forWorkspace($this->workspace->id);
+
+    expect($settings->tracking_api_key)->toBeNull()
+        ->and($settings->trackingEnabled())->toBeFalse();
+});
+
+test('an unknown tracking provider is rejected', function () {
+    $this->actingAs($this->admin)
+        ->post('/settings/commerce-assist', [
+            'tracking_provider' => 'definitely-not-a-provider',
+            'tracking_stale_days' => 10,
+            'example_edit_threshold' => 30,
+            'draft_only' => true,
+        ])
+        ->assertSessionHasErrors('tracking_provider');
+});
+
+test('agents can force a carrier refresh from the conversation panel', function () {
+    enableTrack123();
+    Http::fake(['https://shp.track123.com/*' => Http::response(track123OrderPayload())]);
+    shopifySnapshotWithTracking();
+
+    $this->actingAs($this->admin)
+        ->postJson("/commerce-assist/conversations/{$this->conversation->id}/tracking-refresh")
+        ->assertOk()
+        ->assertJsonPath('tracking.status', 'delivered')
+        ->assertJsonPath('tracking.last_mile_carrier', 'Australia Post');
+});
+
+test('the generation pipeline stores the carrier snapshot it drafted against', function () {
+    enableTrack123();
+    fakeCommerceAgents();
+    Http::fake([
+        'https://test-shop.myshopify.com/admin/api/*' => Http::response(shopifyOrderPayload()),
+        'https://shp.track123.com/*' => Http::response(track123OrderPayload()),
+    ]);
+
+    $generation = app(GenerationPipeline::class)->run($this->conversation->load(['customer', 'threads']));
+
+    expect($generation->tracking_snapshot_id)->not->toBeNull()
+        ->and($generation->sources['tracking'])->toContain('4PX Express');
+});
