@@ -23,7 +23,7 @@ use Laravel\Ai\Promptable;
 #[Model('claude-opus-4-6')]
 #[MaxTokens(1024)]
 #[Temperature(0.7)]
-class ReplySuggestionAgent implements Agent, Conversational, HasTools, HasProviderOptions
+class ReplySuggestionAgent implements Agent, Conversational, HasProviderOptions, HasTools
 {
     use HasConfigurableProviderOptions;
     use Promptable;

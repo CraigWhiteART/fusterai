@@ -30,13 +30,14 @@ export default function CommerceAssistFacts({ facts }: Props) {
                 <div className="space-y-2">
                     <h1 className="text-2xl font-bold tracking-tight">Current facts</h1>
                     <p className="text-sm text-muted-foreground">
-                        Live stock, dates and timelines. These override older knowledge base articles and rewrite related unsent
-                        drafts.
+                        Live stock, dates and timelines. These override older knowledge base articles and rewrite related unsent drafts.
                     </p>
                     <CommerceAssistNav current="/settings/commerce-assist/facts" />
                 </div>
 
-                {active.length === 0 && <p className="text-sm text-muted-foreground">No current facts. Add one from a conversation while reviewing a draft.</p>}
+                {active.length === 0 && (
+                    <p className="text-sm text-muted-foreground">No current facts. Add one from a conversation while reviewing a draft.</p>
+                )}
 
                 <div className="space-y-3">
                     {active.map((fact) => (

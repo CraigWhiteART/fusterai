@@ -66,8 +66,7 @@ function IntentEditor({ intent }: { intent: Intent }) {
 export default function CommerceAssistIntents({ intents }: Props) {
     const [filter, setFilter] = useState('');
     const visible = intents.filter(
-        (intent) =>
-            intent.name.toLowerCase().includes(filter.toLowerCase()) || intent.slug.toLowerCase().includes(filter.toLowerCase()),
+        (intent) => intent.name.toLowerCase().includes(filter.toLowerCase()) || intent.slug.toLowerCase().includes(filter.toLowerCase()),
     );
 
     return (

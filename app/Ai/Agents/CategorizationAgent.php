@@ -18,7 +18,7 @@ use Laravel\Ai\Promptable;
 #[Model('claude-haiku-4-5-20251001')]
 #[MaxTokens(256)]
 #[Temperature(0.1)]
-class CategorizationAgent implements Agent, HasStructuredOutput, HasProviderOptions
+class CategorizationAgent implements Agent, HasProviderOptions, HasStructuredOutput
 {
     use HasConfigurableProviderOptions;
     use Promptable;

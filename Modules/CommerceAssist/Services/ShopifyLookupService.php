@@ -299,7 +299,6 @@ class ShopifyLookupService
 
     /**
      * @param  array<string, mixed>  $item
-     * @param  mixed  $orderTags
      * @param  list<string>  $preorderTags
      */
     private function itemIsPreorder(array $item, mixed $orderTags, array $preorderTags): ?bool

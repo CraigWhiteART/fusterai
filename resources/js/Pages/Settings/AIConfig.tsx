@@ -372,8 +372,8 @@ export default function AIConfig({ aiConfig }: Props) {
                         <div>
                             <h2 className="font-medium text-base">Models by task</h2>
                             <p className="text-xs text-muted-foreground mt-0.5">
-                                Optional overrides. Leave blank to use the default model. Tip: use a fast/cheap model for
-                                categorization and a stronger one for reply suggestions.
+                                Optional overrides. Leave blank to use the default model. Tip: use a fast/cheap model for categorization and
+                                a stronger one for reply suggestions.
                             </p>
                         </div>
 
@@ -412,17 +412,13 @@ export default function AIConfig({ aiConfig }: Props) {
                         <div>
                             <h2 className="font-medium text-base">Reasoning</h2>
                             <p className="text-xs text-muted-foreground mt-0.5">
-                                Controls thinking / reasoning tokens when the provider supports them (OpenAI reasoning
-                                models, OpenRouter <code className="text-[11px]">reasoning</code> object, Anthropic
-                                extended thinking).
+                                Controls thinking / reasoning tokens when the provider supports them (OpenAI reasoning models, OpenRouter{' '}
+                                <code className="text-[11px]">reasoning</code> object, Anthropic extended thinking).
                             </p>
                         </div>
 
                         <Field label="Reasoning effort" error={errors.reasoning_effort}>
-                            <NativeSelect
-                                value={data.reasoning_effort}
-                                onChange={(v) => setData('reasoning_effort', v)}
-                            >
+                            <NativeSelect value={data.reasoning_effort} onChange={(v) => setData('reasoning_effort', v)}>
                                 {REASONING_EFFORTS.map((o) => (
                                     <option key={o.value} value={o.value}>
                                         {o.label}
@@ -444,10 +440,7 @@ export default function AIConfig({ aiConfig }: Props) {
                                     placeholder="e.g. 2000"
                                     value={data.reasoning_max_tokens}
                                     onChange={(e) =>
-                                        setData(
-                                            'reasoning_max_tokens',
-                                            e.target.value === '' ? '' : parseInt(e.target.value, 10),
-                                        )
+                                        setData('reasoning_max_tokens', e.target.value === '' ? '' : parseInt(e.target.value, 10))
                                     }
                                 />
                             </Field>
@@ -464,8 +457,8 @@ export default function AIConfig({ aiConfig }: Props) {
                                 <div>
                                     <p className="text-sm font-medium">Exclude reasoning from response</p>
                                     <p className="text-xs text-muted-foreground">
-                                        Still uses reasoning tokens internally, but hides them from the returned content
-                                        when the provider supports it.
+                                        Still uses reasoning tokens internally, but hides them from the returned content when the provider
+                                        supports it.
                                     </p>
                                 </div>
                             </label>

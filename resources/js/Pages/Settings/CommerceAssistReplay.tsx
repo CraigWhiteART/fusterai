@@ -97,7 +97,10 @@ export default function CommerceAssistReplay({ conversations, runs }: Props) {
                 <section className="space-y-3">
                     <h2 className="text-sm font-semibold">Historical tickets</h2>
                     {conversations.map((conversation) => (
-                        <div key={conversation.id} className="rounded-xl border border-border bg-card p-4 flex items-start justify-between gap-4">
+                        <div
+                            key={conversation.id}
+                            className="rounded-xl border border-border bg-card p-4 flex items-start justify-between gap-4"
+                        >
                             <div className="min-w-0">
                                 <p className="text-sm font-medium">{conversation.subject}</p>
                                 <p className="text-xs text-muted-foreground">
@@ -117,7 +120,9 @@ export default function CommerceAssistReplay({ conversations, runs }: Props) {
                         </div>
                     ))}
                     {conversations.length === 0 && (
-                        <p className="text-sm text-muted-foreground">No historical tickets with both a customer message and an agent reply.</p>
+                        <p className="text-sm text-muted-foreground">
+                            No historical tickets with both a customer message and an agent reply.
+                        </p>
                     )}
                 </section>
             </div>

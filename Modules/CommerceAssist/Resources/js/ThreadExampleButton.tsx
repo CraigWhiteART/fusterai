@@ -39,7 +39,13 @@ export default function ThreadExampleButton({ thread }: Props) {
             disabled={state === 'saving' || state === 'saved'}
             className="mt-1 text-[11px] text-primary/90 hover:underline disabled:text-muted-foreground"
         >
-            {state === 'saved' ? 'Saved as AI example' : state === 'saving' ? 'Saving…' : state === 'error' ? 'Could not save' : 'Use as AI Example'}
+            {state === 'saved'
+                ? 'Saved as AI example'
+                : state === 'saving'
+                  ? 'Saving…'
+                  : state === 'error'
+                    ? 'Could not save'
+                    : 'Use as AI Example'}
         </button>
     );
 }

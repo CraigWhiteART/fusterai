@@ -55,7 +55,12 @@ export default function CommerceAssistExamples({ examples, intents }: Props) {
                     <div className="grid md:grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                             <Label>Customer message</Label>
-                            <Textarea rows={5} value={data.customer_message} onChange={(e) => setData('customer_message', e.target.value)} required />
+                            <Textarea
+                                rows={5}
+                                value={data.customer_message}
+                                onChange={(e) => setData('customer_message', e.target.value)}
+                                required
+                            />
                         </div>
                         <div className="space-y-1.5">
                             <Label>Final reply</Label>
@@ -114,7 +119,9 @@ export default function CommerceAssistExamples({ examples, intents }: Props) {
                                 </button>
                             </div>
                             <p className="text-sm whitespace-pre-wrap">{example.customer_message}</p>
-                            <p className="text-sm text-muted-foreground whitespace-pre-wrap border-t border-border pt-2">{example.final_reply}</p>
+                            <p className="text-sm text-muted-foreground whitespace-pre-wrap border-t border-border pt-2">
+                                {example.final_reply}
+                            </p>
                         </div>
                     ))}
                 </div>

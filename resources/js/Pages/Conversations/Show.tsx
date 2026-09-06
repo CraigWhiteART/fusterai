@@ -52,7 +52,17 @@ const priorityConfig = {
     urgent: { label: 'Urgent', color: 'bg-destructive/10 text-destructive' },
 } as const;
 
-export default function ConversationShow({ conversation, agents, tags, folders, convFolders, mailboxes, survey, commerceAssist, isFollowing }: Props) {
+export default function ConversationShow({
+    conversation,
+    agents,
+    tags,
+    folders,
+    convFolders,
+    mailboxes,
+    survey,
+    commerceAssist,
+    isFollowing,
+}: Props) {
     const { aiConfigured } = usePage<{ aiConfigured: boolean }>().props;
 
     const [aiSuggestion, setAiSuggestion] = useState<{ id: number | null; content: string } | null>(

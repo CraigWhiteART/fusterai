@@ -119,11 +119,7 @@ export default function FactComposer({ conversation, commerceAssist }: Props) {
     }
 
     if (done) {
-        return (
-            <div className="mb-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs">
-                {done}
-            </div>
-        );
+        return <div className="mb-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs">{done}</div>;
     }
 
     if (!open) {
@@ -145,9 +141,7 @@ export default function FactComposer({ conversation, commerceAssist }: Props) {
             <div className="flex items-start justify-between gap-3">
                 <div>
                     <p className="text-sm font-medium">What’s true now?</p>
-                    <p className="text-xs text-muted-foreground">
-                        Related unsent drafts will be rewritten. Nothing is sent to customers.
-                    </p>
+                    <p className="text-xs text-muted-foreground">Related unsent drafts will be rewritten. Nothing is sent to customers.</p>
                 </div>
                 <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setOpen(false)}>
                     Cancel
@@ -164,7 +158,11 @@ export default function FactComposer({ conversation, commerceAssist }: Props) {
                 <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Applies to products</p>
                 <div className="flex flex-wrap gap-1.5">
                     {products.map((product) => (
-                        <Chip key={product} label={product} onRemove={() => setProducts((prev) => prev.filter((item) => item !== product))} />
+                        <Chip
+                            key={product}
+                            label={product}
+                            onRemove={() => setProducts((prev) => prev.filter((item) => item !== product))}
+                        />
                     ))}
                     <form onSubmit={addProduct} className="inline">
                         <input
@@ -176,7 +174,9 @@ export default function FactComposer({ conversation, commerceAssist }: Props) {
                     </form>
                 </div>
                 {products.length > 0 ? (
-                    <p className="text-[11px] text-muted-foreground">Remove products to widen this to every unsent draft with the same intent.</p>
+                    <p className="text-[11px] text-muted-foreground">
+                        Remove products to widen this to every unsent draft with the same intent.
+                    </p>
                 ) : (
                     <p className="text-[11px] text-muted-foreground">No product filter — matching by intent only.</p>
                 )}
