@@ -1,5 +1,6 @@
 <?php
 
+use App\Domains\Mailbox\Models\ImapProcessedUid;
 use App\Domains\Mailbox\Models\Mailbox;
 use App\Domains\Mailbox\Support\ImapInboundMessage;
 use App\Models\Workspace;
@@ -82,4 +83,41 @@ test('oversize attachments are dropped from the inbound payload', function () {
     expect($kept)->toHaveCount(1)
         ->and($kept[0]['name'])->toBe('ok.txt')
         ->and(base64_decode($kept[0]['content']))->toBe('hello');
+});
+
+test('imap fetch tracks processed uids locally instead of marking mail as read', function () {
+    $src = file_get_contents(app_path('Console/Commands/FetchEmails.php'));
+
+    expect($src)->toContain('leaveUnread()')
+        ->and($src)->toContain('ImapProcessedUid::remember')
+        ->and($src)->not->toContain("setFlag('Seen')")
+        ->and($src)->not->toContain("'\\\\Seen'");
+});
+
+test('pending imap uids skip already ingested messages and take newest first', function () {
+    $mailbox = Mailbox::factory()->create();
+
+    ImapProcessedUid::remember($mailbox->id, 12);
+    ImapProcessedUid::remember($mailbox->id, 15);
+
+    $batch = ImapProcessedUid::pending($mailbox->id, collect([10, 11, 12, 13, 14, 15]), 3);
+
+    expect($batch->all())->toBe([14, 13, 11]);
+});
+
+test('remembering an imap uid is idempotent', function () {
+    $mailbox = Mailbox::factory()->create();
+
+    ImapProcessedUid::remember($mailbox->id, 42);
+    ImapProcessedUid::remember($mailbox->id, 42);
+
+    expect(ImapProcessedUid::where('mailbox_id', $mailbox->id)->count())->toBe(1);
+});
+
+test('pending imap uids ignore empty and invalid identifiers', function () {
+    $mailbox = Mailbox::factory()->create();
+
+    $batch = ImapProcessedUid::pending($mailbox->id, collect([0, -1, '12', 12]), 5);
+
+    expect($batch->all())->toBe([12]);
 });

@@ -3,13 +3,13 @@
 namespace App\Console\Commands;
 
 use App\Domains\Conversation\Jobs\ProcessInboundEmailJob;
+use App\Domains\Mailbox\Models\ImapProcessedUid;
 use App\Domains\Mailbox\Models\Mailbox;
 use App\Domains\Mailbox\Support\ImapInboundMessage;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Webklex\PHPIMAP\Client;
 use Webklex\PHPIMAP\ClientManager;
-use Webklex\PHPIMAP\IMAP;
 
 class FetchEmails extends Command
 {
@@ -76,9 +76,10 @@ class FetchEmails extends Command
             $client->connect();
 
             $folder = $client->getFolder('INBOX');
-            $uids = $folder->query()->unseen()->search();
+            // BODY.PEEK: download without setting \Seen (Gmail "read").
+            $uids = $folder->query()->leaveUnread()->unseen()->search();
             $limit = max(1, (int) $this->option('limit'));
-            $batch = $uids->reverse()->take($limit)->values();
+            $batch = ImapProcessedUid::pending($mailbox->id, $uids, $limit);
 
             $this->info("  {$uids->count()} unseen; processing {$batch->count()} (newest first).");
 
@@ -102,7 +103,7 @@ class FetchEmails extends Command
             $size = $this->rfc822Size($client, $uid);
             if ($size > self::MAX_MESSAGE_BYTES) {
                 $this->warn("  Skipping UID {$uid}: {$size} bytes exceeds limit.");
-                $this->markSeen($client, $uid);
+                ImapProcessedUid::remember($mailbox->id, $uid);
                 Log::warning('FetchEmails skipped oversized message', [
                     'mailbox_id' => $mailbox->id,
                     'uid' => $uid,
@@ -112,14 +113,15 @@ class FetchEmails extends Command
                 return;
             }
 
-            $message = $client->getFolder('INBOX')->query()->getMessageByUid($uid);
+            $message = $client->getFolder('INBOX')->query()->leaveUnread()->getMessageByUid($uid);
 
             ProcessInboundEmailJob::dispatch(
                 $mailbox->id,
                 ImapInboundMessage::toPayload($message),
             )->onQueue('email-inbound');
 
-            $message->setFlag('Seen');
+            // Track locally. Do not set \Seen — that marks the message read in Gmail.
+            ImapProcessedUid::remember($mailbox->id, $uid);
         } catch (\Throwable $e) {
             $this->error("  UID {$uid}: ".$e->getMessage());
             Log::error('FetchEmails message failed', [
@@ -157,11 +159,6 @@ class FetchEmails extends Command
         }
 
         return 0;
-    }
-
-    private function markSeen(Client $client, int $uid): void
-    {
-        $client->getConnection()->store(['\\Seen'], $uid, $uid, '+', true, IMAP::ST_UID);
     }
 
     private function normalizePassword(string $password): string
