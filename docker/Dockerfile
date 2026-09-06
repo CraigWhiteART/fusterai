@@ -44,8 +44,12 @@ RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y nodejs \
     && npm install -g npm \
     # PostgreSQL client
-    && curl -sS https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor | tee /etc/apt/keyrings/pgdg.gpg > /dev/null \
-    && echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" \
+    # The armored key is written straight to a .asc keyring, which apt reads as-is.
+    # The previous `curl | gpg --dearmor | tee` pipeline reported the exit status of
+    # tee, so a failed download silently produced an invalid keyring and the build
+    # died later with NO_PUBKEY. -f makes a bad response fail loudly instead.
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /etc/apt/keyrings/pgdg.asc \
+    && echo "deb [signed-by=/etc/apt/keyrings/pgdg.asc] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" \
        > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
     && apt-get install -y postgresql-client-$POSTGRES_VERSION \

@@ -571,6 +571,39 @@ vendor/bin/pest tests/Feature/          # Feature tests only
 vendor/bin/pest --filter="conversation" # Filter by name
 ```
 
+#### In Docker
+
+No local PHP 8.4, Postgres or pgvector required — the test stack brings its own,
+and mirrors `.github/workflows/ci.yml` so a green run here means a green run in CI.
+
+```bash
+composer test:docker                                              # Run all tests
+docker compose -f docker-compose.test.yml run --rm test --filter=CommerceAssist
+docker compose -f docker-compose.test.yml run --rm test --parallel
+docker compose -f docker-compose.test.yml down -v                 # Tear down
+```
+
+Anything after `test` is passed through to Pest; with no arguments it runs the
+whole suite in parallel. The first run builds the image, installs Composer and
+Node dependencies and builds the frontend assets that Inertia page tests render
+against (several minutes); later runs start in seconds. After changing a React
+component, `rm -rf public/build` to force an asset rebuild.
+
+This stack is separate from `docker-compose.yml` on purpose. It skips the dev
+bootstrap (npm install, asset build, route caching, supervisord), publishes no
+ports so it cannot collide with a running dev stack, keeps Postgres data in
+`tmpfs` so a test run can never touch development data, and writes its
+configuration to `.env.testing` rather than your `.env`.
+
+To open a shell in the same environment — for `pint`, `phpstan` or `artisan`:
+
+```bash
+docker compose -f docker-compose.test.yml run --rm --user 1000 --entrypoint bash test
+```
+
+`--user 1000` matters: `--entrypoint` bypasses the entrypoint's own user drop, and
+anything run as root leaves root-owned files in the `node_modules` volume.
+
 ### Code Quality
 
 ```bash

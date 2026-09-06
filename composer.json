@@ -73,6 +73,7 @@
             "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74,#86efac,#fde68a\" \"php artisan serve\" \"php artisan horizon\" \"php artisan reverb:start\" \"php artisan schedule:work\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,horizon,reverb,scheduler,logs,vite --kill-others"
         ],
         "test": "./vendor/bin/pest",
+        "test:docker": "docker compose -f docker-compose.test.yml run --rm test",
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"

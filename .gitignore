@@ -16,6 +16,7 @@
 .env.backup
 .env.production
 .env.staging
+.env.testing
 # Safe to commit — contain no secrets
 !.env.example
 !.env.docker

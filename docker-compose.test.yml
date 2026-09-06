@@ -1,0 +1,102 @@
+# Test stack. Deliberately separate from docker-compose.yml: the dev stack runs
+# npm install, builds assets, caches routes and starts supervisord before it is
+# usable, none of which a test run needs.
+#
+#   docker compose -f docker-compose.test.yml run --rm test
+#   docker compose -f docker-compose.test.yml run --rm test --filter=CommerceAssist
+#   docker compose -f docker-compose.test.yml down -v
+#
+# Mirrors .github/workflows/ci.yml so a green run here means a green run in CI.
+
+name: fusterai-test
+
+services:
+    # ── PostgreSQL (ephemeral) ────────────────────────────────────────────────
+    pgsql:
+        image: 'pgvector/pgvector:pg17'
+        environment:
+            POSTGRES_DB: fusterai_test
+            POSTGRES_USER: fusterai
+            POSTGRES_PASSWORD: secret
+            POSTGRES_HOST_AUTH_METHOD: trust
+        volumes:
+            - './docker/postgres/init-test.sql:/docker-entrypoint-initdb.d/init.sql'
+        # In-memory data directory: fast, and torn down with the container so a
+        # test run can never inherit or corrupt development data.
+        tmpfs:
+            - /var/lib/postgresql/data
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U fusterai -d fusterai_test']
+            interval: 3s
+            timeout: 5s
+            retries: 20
+        networks:
+            - test
+
+    # ── Redis ─────────────────────────────────────────────────────────────────
+    # phpunit.xml uses array cache / sync queue, so this is only here to match CI
+    # and to catch anything that reaches for a real connection.
+    redis:
+        image: 'redis:7-alpine'
+        command: 'redis-server --save "" --appendonly no --loglevel warning'
+        healthcheck:
+            test: ['CMD', 'redis-cli', 'ping']
+            interval: 3s
+            timeout: 5s
+            retries: 20
+        networks:
+            - test
+
+    # ── Test runner ───────────────────────────────────────────────────────────
+    test:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+            args:
+                WWWGROUP: '${WWWGROUP:-1000}'
+        image: fusterai/app
+        depends_on:
+            pgsql:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        environment:
+            WWWUSER: '${WWWUSER:-1000}'
+            APP_ENV: testing
+            DB_CONNECTION: pgsql
+            DB_HOST: pgsql
+            DB_PORT: 5432
+            DB_DATABASE: fusterai_test
+            DB_USERNAME: fusterai
+            DB_PASSWORD: secret
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            CACHE_STORE: array
+            QUEUE_CONNECTION: sync
+            SESSION_DRIVER: array
+            # Quoted: bare null in YAML is a null value, not the driver name.
+            BROADCAST_CONNECTION: 'null'
+            SCOUT_DRIVER: collection
+            MAIL_MAILER: array
+        working_dir: /var/www/html
+        volumes:
+            - '.:/var/www/html'
+            # Named volume: node_modules is far too slow to install and read
+            # across a bind mount, especially on Windows and macOS.
+            - 'test-node-modules:/var/www/html/node_modules'
+        # Args passed to `docker compose run test …` land on the pest command.
+        entrypoint: ['bash', '/var/www/html/docker/test-entrypoint.sh']
+        # Default only — any argument you pass replaces this, so
+        # `run --rm test --filter=Foo` runs that filter serially.
+        command: ['--parallel']
+        # No ports published: the test stack must never collide with the dev stack.
+        networks:
+            - test
+
+volumes:
+    test-node-modules:
+        driver: local
+
+networks:
+    test:
+        driver: bridge
