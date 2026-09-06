@@ -1,7 +1,8 @@
 import React from 'react';
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Button } from '@/Components/ui/button';
+import CommerceAssistNav from './CommerceAssistNav';
 
 interface Candidate {
     id: number;
@@ -37,20 +38,7 @@ export default function CommerceAssistReplay({ conversations, runs }: Props) {
                     <p className="text-sm text-muted-foreground">
                         Run the current AI configuration against an old conversation. Nothing is sent to the customer.
                     </p>
-                    <div className="flex flex-wrap gap-3 text-sm">
-                        <Link href="/settings/commerce-assist" className="text-muted-foreground hover:text-foreground">
-                            Settings
-                        </Link>
-                        <Link href="/settings/commerce-assist/intents" className="text-muted-foreground hover:text-foreground">
-                            Intent rules
-                        </Link>
-                        <Link href="/settings/commerce-assist/examples" className="text-muted-foreground hover:text-foreground">
-                            Approved replies
-                        </Link>
-                        <Link href="/settings/commerce-assist/replay" className="text-primary font-medium">
-                            Replay
-                        </Link>
-                    </div>
+                    <CommerceAssistNav current="/settings/commerce-assist/replay" />
                 </div>
 
                 {runs.length > 0 && (

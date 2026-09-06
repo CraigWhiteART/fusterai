@@ -31,6 +31,10 @@ const moduleSlots: Record<string, { slot: string; component: React.LazyExoticCom
         },
         {
             slot: 'conversation.reply.before',
+            component: React.lazy(() => import('../../Modules/CommerceAssist/Resources/js/FactComposer')),
+        },
+        {
+            slot: 'conversation.reply.before',
             component: React.lazy(() => import('../../Modules/CommerceAssist/Resources/js/DraftLearningBanner')),
         },
         {

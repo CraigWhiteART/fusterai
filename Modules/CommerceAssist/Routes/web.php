@@ -5,6 +5,7 @@ use Modules\CommerceAssist\Http\Controllers\ApprovedResponseController;
 use Modules\CommerceAssist\Http\Controllers\ConversationContextController;
 use Modules\CommerceAssist\Http\Controllers\ExampleController;
 use Modules\CommerceAssist\Http\Controllers\IntentController;
+use Modules\CommerceAssist\Http\Controllers\LiveFactController;
 use Modules\CommerceAssist\Http\Controllers\ReplayController;
 use Modules\CommerceAssist\Http\Controllers\SettingsController;
 
@@ -22,6 +23,14 @@ Route::middleware(['auth', 'module.active:CommerceAssist'])->group(function () {
     Route::get('/settings/commerce-assist/replay', [ReplayController::class, 'index'])->name('settings.commerce-assist.replay');
     Route::post('/settings/commerce-assist/replay/{conversation}', [ReplayController::class, 'run'])->name('settings.commerce-assist.replay.run');
     Route::patch('/settings/commerce-assist/replay/{run}/mark', [ReplayController::class, 'mark'])->name('settings.commerce-assist.replay.mark');
+
+    Route::get('/settings/commerce-assist/facts', [LiveFactController::class, 'index'])->name('settings.commerce-assist.facts');
+    Route::post('/settings/commerce-assist/facts/{fact}/retire', [LiveFactController::class, 'retire'])->name('settings.commerce-assist.facts.retire');
+
+    Route::get('/commerce-assist/conversations/{conversation}/fact-defaults', [LiveFactController::class, 'infer'])->name('commerce-assist.fact-defaults');
+    Route::post('/commerce-assist/facts/preview', [LiveFactController::class, 'preview'])->name('commerce-assist.facts.preview');
+    Route::post('/commerce-assist/facts', [LiveFactController::class, 'store'])->name('commerce-assist.facts.store');
+    Route::post('/commerce-assist/facts/{fact}/retire', [LiveFactController::class, 'retire'])->name('commerce-assist.facts.retire-json');
 
     Route::get('/commerce-assist/conversations/{conversation}', [ConversationContextController::class, 'show'])->name('commerce-assist.context');
     Route::post('/commerce-assist/conversations/{conversation}/shopify-refresh', [ConversationContextController::class, 'refreshShopify'])->name('commerce-assist.shopify-refresh');

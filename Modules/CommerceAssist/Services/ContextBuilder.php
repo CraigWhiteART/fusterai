@@ -28,10 +28,13 @@ class ContextBuilder
         Collection $kbDocs,
         bool $hasPhotos,
         ?int $trackingStaleDays = null,
+        ?Collection $liveFacts = null,
     ): array {
+        $liveFacts ??= collect();
         $shopify = $this->formatShopify($snapshot);
         $customer = $this->formatCustomer($conversation, $hasPhotos);
         $kb = $this->formatKnowledge($kbDocs);
+        $facts = $this->formatLiveFacts($liveFacts);
         $rules = $this->formatRules($intent, $subtype, $snapshot, $trackingStaleDays);
         $exampleBlock = $this->formatExamples($examples);
         $subtypeLabel = $classification['subtype'] ?? $subtype?->slug ?? 'none';
@@ -46,6 +49,7 @@ Approved responses are examples of style, structure and response strategy only.
 Never copy customer-specific facts from examples.
 Never invent order status, tracking, dates, policies, prices, or product facts.
 If a fact is not in the verified sections below, say you do not have that information.
+Current business facts override older knowledge base articles when they conflict.
 Do not promise refunds, replacements, address changes, or dispatch dates unless verified data supports it.
 Do not add a Subject line. Write only the reply body.
 Address the customer by first name when known.
@@ -60,6 +64,9 @@ VERIFIED CUSTOMER DATA
 VERIFIED SHOPIFY DATA
 {$shopify}
 
+CURRENT BUSINESS FACTS
+{$facts}
+
 VERIFIED KNOWLEDGE BASE FACTS
 {$kb}
 
@@ -72,7 +79,8 @@ RELEVANT APPROVED RESPONSE EXAMPLES
 {$exampleBlock}
 
 WRITING INSTRUCTIONS
-- Use verified data and knowledge for factual claims.
+- Use verified data, current business facts, and knowledge for factual claims.
+- Current business facts win if they conflict with older knowledge base articles.
 - Use approved responses only for style, structure, and strategy.
 - Never copy customer-specific facts from examples.
 - If tracking is missing, say tracking is not on the order — do not invent a number.
@@ -86,6 +94,7 @@ PROMPT;
             'user' => $user,
             'sources' => [
                 'shopify' => $this->shopifySourceLabel($snapshot),
+                'facts' => $liveFacts->map(fn ($fact) => $fact->title ?: mb_substr(PlainText::from($fact->body), 0, 60))->values()->all(),
                 'knowledge' => $kbDocs->map(fn ($doc) => $doc->title)->values()->all(),
                 'examples' => $examples->map(fn (ApprovedResponse $example) => trim(($example->intent ?: 'example').' #'.$example->id))->values()->all(),
                 'intent' => $intent->slug,
@@ -164,6 +173,22 @@ PROMPT;
             'photos_attached: '.$this->bool($hasPhotos),
             'subject: '.$this->val($conversation->subject),
         ]);
+    }
+
+    /**
+     * @param  Collection<int, object{title?: string, body: string}>  $facts
+     */
+    public function formatLiveFacts(Collection $facts): string
+    {
+        if ($facts->isEmpty()) {
+            return 'No current business facts. Use knowledge base and Shopify data only.';
+        }
+
+        return $facts->map(function ($fact) {
+            $title = $fact->title ?: 'Update';
+
+            return "- {$title}: {$fact->body}";
+        })->implode("\n");
     }
 
     /**

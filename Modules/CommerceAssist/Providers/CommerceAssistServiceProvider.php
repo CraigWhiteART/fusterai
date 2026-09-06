@@ -9,6 +9,7 @@ use Modules\CommerceAssist\Models\Generation;
 use Modules\CommerceAssist\Models\ShopifySnapshot;
 use Modules\CommerceAssist\Services\EditLearningService;
 use Modules\CommerceAssist\Services\GenerationPipeline;
+use Modules\CommerceAssist\Services\LiveFactService;
 
 class CommerceAssistServiceProvider extends ServiceProvider
 {
@@ -38,6 +39,8 @@ class CommerceAssistServiceProvider extends ServiceProvider
         Hooks::addFilter('conversation.show.extra', function (array $extra, Conversation $conversation): array {
             $generation = Generation::where('conversation_id', $conversation->id)->latest()->first();
             $snapshot = ShopifySnapshot::where('conversation_id', $conversation->id)->latest()->first();
+            $facts = app(LiveFactService::class);
+            $applied = $facts->forConversation($conversation, $generation?->intent, $generation?->subtype, $snapshot);
 
             $extra['commerceAssist'] = [
                 'shopify' => $snapshot?->payload,
@@ -45,6 +48,8 @@ class CommerceAssistServiceProvider extends ServiceProvider
                 'nominate' => ($generation && $generation->nominated_as_example && ! $generation->added_as_example)
                     ? $generation->toUiArray()
                     : null,
+                'liveFacts' => $applied->map->toUiArray()->values()->all(),
+                'composer' => $facts->inferFromConversation($conversation),
             ];
 
             return $extra;

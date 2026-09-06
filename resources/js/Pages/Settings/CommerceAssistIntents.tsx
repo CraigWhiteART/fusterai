@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Head, Link, useForm } from '@inertiajs/react';
+import { Head, useForm } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Button } from '@/Components/ui/button';
 import { Label } from '@/Components/ui/label';
 import { Switch } from '@/Components/ui/switch';
 import { Textarea } from '@/Components/ui/textarea';
+import CommerceAssistNav from './CommerceAssistNav';
 
 interface Intent {
     id: number;
@@ -76,20 +77,7 @@ export default function CommerceAssistIntents({ intents }: Props) {
                 <div className="space-y-2">
                     <h1 className="text-2xl font-bold tracking-tight">Intent rules</h1>
                     <p className="text-sm text-muted-foreground">Small rule sets per intent — not one giant prompt.</p>
-                    <div className="flex flex-wrap gap-3 text-sm">
-                        <Link href="/settings/commerce-assist" className="text-muted-foreground hover:text-foreground">
-                            Settings
-                        </Link>
-                        <Link href="/settings/commerce-assist/intents" className="text-primary font-medium">
-                            Intent rules
-                        </Link>
-                        <Link href="/settings/commerce-assist/examples" className="text-muted-foreground hover:text-foreground">
-                            Approved replies
-                        </Link>
-                        <Link href="/settings/commerce-assist/replay" className="text-muted-foreground hover:text-foreground">
-                            Replay
-                        </Link>
-                    </div>
+                    <CommerceAssistNav current="/settings/commerce-assist/intents" />
                 </div>
                 <input
                     className="max-w-sm w-full border rounded-md px-3 py-2 text-sm bg-background"

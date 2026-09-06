@@ -15,6 +15,8 @@ Fuster remains the helpdesk. This module adds:
 9. Source visibility on the conversation
 10. Historical ticket replay
 
+Live facts: while reviewing a draft, type what is true now (stock, dates, timelines). Related unsent drafts are rewritten. Current facts override older knowledge base articles. Nothing is sent to customers.
+
 It does **not** edit Shopify orders, issue refunds, auto-send, or fine-tune a model.
 
 Enable it in **Settings → Modules**. Configure Shopify under **Settings → Commerce Assist**.

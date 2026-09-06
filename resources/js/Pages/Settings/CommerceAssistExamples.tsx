@@ -1,10 +1,11 @@
 import React from 'react';
-import { Head, Link, router, useForm } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Button } from '@/Components/ui/button';
 import { Label } from '@/Components/ui/label';
 import { Textarea } from '@/Components/ui/textarea';
 import { Input } from '@/Components/ui/input';
+import CommerceAssistNav from './CommerceAssistNav';
 
 interface Example {
     id: number;
@@ -47,20 +48,7 @@ export default function CommerceAssistExamples({ examples, intents }: Props) {
                     <p className="text-sm text-muted-foreground">
                         How the agent responds — separate from the knowledge base, which answers what is true.
                     </p>
-                    <div className="flex flex-wrap gap-3 text-sm">
-                        <Link href="/settings/commerce-assist" className="text-muted-foreground hover:text-foreground">
-                            Settings
-                        </Link>
-                        <Link href="/settings/commerce-assist/intents" className="text-muted-foreground hover:text-foreground">
-                            Intent rules
-                        </Link>
-                        <Link href="/settings/commerce-assist/examples" className="text-primary font-medium">
-                            Approved replies
-                        </Link>
-                        <Link href="/settings/commerce-assist/replay" className="text-muted-foreground hover:text-foreground">
-                            Replay
-                        </Link>
-                    </div>
+                    <CommerceAssistNav current="/settings/commerce-assist/examples" />
                 </div>
 
                 <form onSubmit={submit} className="rounded-xl border border-border bg-card p-5 space-y-3 max-w-3xl">

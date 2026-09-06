@@ -8,16 +8,19 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Modules\CommerceAssist\Models\Generation;
 use Modules\CommerceAssist\Models\ShopifySnapshot;
+use Modules\CommerceAssist\Services\LiveFactService;
 use Modules\CommerceAssist\Services\ShopifyLookupService;
 
 class ConversationContextController extends Controller
 {
-    public function show(Request $request, Conversation $conversation): JsonResponse
+    public function show(Request $request, Conversation $conversation, LiveFactService $facts): JsonResponse
     {
         $this->authorize('view', $conversation);
 
         $generation = Generation::where('conversation_id', $conversation->id)->latest()->first();
         $snapshot = ShopifySnapshot::where('conversation_id', $conversation->id)->latest()->first();
+        $applied = $facts->forConversation($conversation, $generation?->intent, $generation?->subtype, $snapshot);
+        $inferred = $facts->inferFromConversation($conversation);
 
         return response()->json([
             'shopify' => $snapshot?->payload,
@@ -25,6 +28,8 @@ class ConversationContextController extends Controller
             'nominate' => ($generation && $generation->nominated_as_example && ! $generation->added_as_example)
                 ? $generation->toUiArray()
                 : null,
+            'liveFacts' => $applied->map->toUiArray()->values()->all(),
+            'composer' => $inferred,
         ]);
     }
 

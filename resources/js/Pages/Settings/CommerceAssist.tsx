@@ -1,10 +1,11 @@
 import React from 'react';
-import { Head, Link, useForm } from '@inertiajs/react';
+import { Head, useForm } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
 import { Switch } from '@/Components/ui/switch';
+import CommerceAssistNav from './CommerceAssistNav';
 
 interface Props {
     settings: {
@@ -16,25 +17,6 @@ interface Props {
         preorder_tags: string;
         draft_only: boolean;
     };
-}
-
-function Nav() {
-    return (
-        <div className="flex flex-wrap gap-3 text-sm">
-            <Link href="/settings/commerce-assist" className="text-primary font-medium">
-                Settings
-            </Link>
-            <Link href="/settings/commerce-assist/intents" className="text-muted-foreground hover:text-foreground">
-                Intent rules
-            </Link>
-            <Link href="/settings/commerce-assist/examples" className="text-muted-foreground hover:text-foreground">
-                Approved replies
-            </Link>
-            <Link href="/settings/commerce-assist/replay" className="text-muted-foreground hover:text-foreground">
-                Replay
-            </Link>
-        </div>
-    );
 }
 
 export default function CommerceAssistSettings({ settings }: Props) {
@@ -63,7 +45,7 @@ export default function CommerceAssistSettings({ settings }: Props) {
                         Shopify-backed facts, approved-response examples, and a second-pass fact checker. Drafts only until you turn off
                         draft-only mode.
                     </p>
-                    <Nav />
+                    <CommerceAssistNav current="/settings/commerce-assist" />
                 </div>
 
                 <form onSubmit={submit} className="max-w-xl space-y-6">

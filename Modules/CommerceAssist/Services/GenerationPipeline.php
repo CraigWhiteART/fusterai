@@ -27,6 +27,7 @@ class GenerationPipeline
         private readonly ContextBuilder $context,
         private readonly FactValidator $validator,
         private readonly ConfidenceScorer $confidence,
+        private readonly LiveFactService $liveFacts,
         private readonly AiSettingsService $aiSettings,
     ) {}
 
@@ -65,6 +66,7 @@ class GenerationPipeline
             $query,
             (int) config('commerce-assist.kb_limit', 5),
         );
+        $liveFacts = $this->liveFacts->forConversation($conversation, $intent->slug, $subtype?->slug, $snapshot);
 
         $hasPhotos = $conversation->threads->contains(function (Thread $thread) {
             return $thread->attachments->contains(
@@ -83,10 +85,12 @@ class GenerationPipeline
             $kbDocs,
             $hasPhotos,
             $settings->tracking_stale_days,
+            $liveFacts,
         );
 
-        $verifiedBlock = "VERIFIED CUSTOMER DATA AND SHOPIFY DATA AND KNOWLEDGE\n"
+        $verifiedBlock = "VERIFIED CUSTOMER DATA AND SHOPIFY DATA AND KNOWLEDGE AND CURRENT BUSINESS FACTS\n"
             .$this->context->formatShopify($snapshot)."\n"
+            .$this->context->formatLiveFacts($liveFacts)."\n"
             .$kbDocs->map(fn ($doc) => $doc->title.': '.PlainText::from($doc->content))->implode("\n");
 
         $model = null;

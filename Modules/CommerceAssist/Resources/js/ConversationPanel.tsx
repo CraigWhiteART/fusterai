@@ -13,6 +13,7 @@ interface Generation {
     unsupported_claims?: string[];
     sources?: {
         shopify?: string;
+        facts?: string[];
         knowledge?: string[];
         examples?: string[];
         intent?: string;
@@ -35,9 +36,16 @@ interface ShopifyPayload {
     products?: { title?: string; variant?: string; quantity?: number; preorder?: boolean | null }[];
 }
 
+interface LiveFact {
+    id: number;
+    title?: string | null;
+    body: string;
+}
+
 interface CommerceAssistPayload {
     shopify?: ShopifyPayload | null;
     generation?: Generation | null;
+    liveFacts?: LiveFact[];
 }
 
 interface Conversation {
@@ -93,6 +101,7 @@ export default function ConversationPanel({ conversation, commerceAssist }: Prop
 
     const shopify = data.shopify;
     const generation = data.generation;
+    const liveFacts = data.liveFacts ?? [];
 
     return (
         <div className="p-4 border-t border-border space-y-4">
@@ -147,12 +156,27 @@ export default function ConversationPanel({ conversation, commerceAssist }: Prop
                 <p className="text-xs text-muted-foreground">{shopify?.reason ?? 'No Shopify match yet.'}</p>
             )}
 
+            {liveFacts.length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-border">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Current facts</p>
+                    {liveFacts.map((fact) => (
+                        <p key={fact.id} className="text-xs leading-relaxed">
+                            {fact.body}
+                        </p>
+                    ))}
+                </div>
+            )}
+
             {generation && (
                 <div className="space-y-1.5 pt-2 border-t border-border">
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">AI used</p>
                     <p className="text-xs">
                         <span className="text-muted-foreground">Shopify: </span>
                         {generation.sources?.shopify ?? '—'}
+                    </p>
+                    <p className="text-xs">
+                        <span className="text-muted-foreground">Facts: </span>
+                        {(generation.sources?.facts ?? []).join(', ') || 'none'}
                     </p>
                     <p className="text-xs">
                         <span className="text-muted-foreground">Knowledge: </span>

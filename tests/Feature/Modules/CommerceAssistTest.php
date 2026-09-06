@@ -26,14 +26,18 @@ use Modules\CommerceAssist\Jobs\IndexApprovedResponseJob;
 use Modules\CommerceAssist\Models\ApprovedResponse;
 use Modules\CommerceAssist\Models\CommerceIntent;
 use Modules\CommerceAssist\Models\CommerceSetting;
+use Modules\CommerceAssist\Jobs\RefreshDraftsForFactJob;
 use Modules\CommerceAssist\Models\Generation;
+use Modules\CommerceAssist\Models\LiveFact;
 use Modules\CommerceAssist\Models\ReplayRun;
+use Modules\CommerceAssist\Models\ShopifySnapshot;
 use Modules\CommerceAssist\Providers\CommerceAssistServiceProvider;
 use Modules\CommerceAssist\Services\ContextBuilder;
 use Modules\CommerceAssist\Services\EditLearningService;
 use Modules\CommerceAssist\Services\ExampleService;
 use Modules\CommerceAssist\Services\GenerationPipeline;
 use Modules\CommerceAssist\Services\IntentCatalog;
+use Modules\CommerceAssist\Services\LiveFactService;
 use Modules\CommerceAssist\Services\ShopifyLookupService;
 use Modules\CommerceAssist\Support\PlainText;
 
@@ -459,3 +463,166 @@ test('knowledge base documents stay separate from approved responses', function 
         ->and(KbDocument::count())->toBe(1)
         ->and(ApprovedResponse::first()->customer_message)->not->toBe(KbDocument::first()->content);
 });
+
+function seedUnsentDraft(array $overrides = []): Conversation
+{
+    $customer = Customer::factory()->create([
+        'workspace_id' => test()->workspace->id,
+        'email' => fake()->unique()->safeEmail(),
+    ]);
+
+    $conversation = Conversation::factory()->create([
+        'workspace_id' => test()->workspace->id,
+        'mailbox_id' => test()->mailbox->id,
+        'customer_id' => $customer->id,
+        'status' => 'open',
+        'subject' => $overrides['subject'] ?? 'Preorder timing for Arcade Cabinet',
+    ]);
+
+    Generation::create([
+        'workspace_id' => test()->workspace->id,
+        'conversation_id' => $conversation->id,
+        'ai_draft' => $overrides['draft'] ?? 'Cabinets ship in March.',
+        'intent' => $overrides['intent'] ?? 'preorder_status',
+        'subtype' => $overrides['subtype'] ?? 'preorder_status',
+        'status' => 'draft',
+        'validator_passed' => true,
+        'requires_human' => false,
+        'safe_to_send' => false,
+    ]);
+
+    ShopifySnapshot::create([
+        'workspace_id' => test()->workspace->id,
+        'conversation_id' => $conversation->id,
+        'payload' => [
+            'found' => true,
+            'order_number' => $overrides['order'] ?? 'SD1001',
+            'products' => [[
+                'title' => $overrides['product'] ?? 'Arcade Cabinet',
+                'sku' => $overrides['sku'] ?? 'CAB-PREORDER',
+                'variant' => 'Black',
+                'quantity' => 1,
+            ]],
+        ],
+        'fetched_at' => now(),
+    ]);
+
+    return $conversation;
+}
+
+test('live facts match related unsent drafts by product and skip sent or closed tickets', function () {
+    $related = seedUnsentDraft();
+    $otherProduct = seedUnsentDraft([
+        'subject' => 'When does the poster ship?',
+        'product' => 'Art Poster',
+        'sku' => 'POSTER-1',
+        'intent' => 'preorder_status',
+    ]);
+    $sent = seedUnsentDraft(['subject' => 'Already answered cabinet']);
+    Generation::where('conversation_id', $sent->id)->update(['reply_thread_id' => Thread::factory()->create([
+        'conversation_id' => $sent->id,
+        'user_id' => test()->admin->id,
+    ])->id]);
+    $closed = seedUnsentDraft(['subject' => 'Closed cabinet ticket']);
+    $closed->update(['status' => 'closed']);
+
+    $matches = app(LiveFactService::class)->previewDrafts(
+        test()->workspace->id,
+        ['preorder_status'],
+        ['Arcade Cabinet', 'CAB-PREORDER'],
+        test()->conversation->id,
+    )->pluck('id');
+
+    expect($matches)->toContain($related->id)
+        ->and($matches)->toContain(test()->conversation->id)
+        ->and($matches)->not->toContain($otherProduct->id)
+        ->and($matches)->not->toContain($sent->id)
+        ->and($matches)->not->toContain($closed->id);
+});
+
+test('a live fact without product keywords matches by intent', function () {
+    $related = seedUnsentDraft(['intent' => 'preorder_status']);
+    $unrelated = seedUnsentDraft([
+        'intent' => 'duties_tariffs',
+        'subtype' => 'duties_tariffs',
+        'product' => 'Arcade Cabinet',
+        'subject' => 'Do I pay duty on the cabinet?',
+    ]);
+
+    $matches = app(LiveFactService::class)->previewDrafts(
+        test()->workspace->id,
+        ['preorder_status'],
+        [],
+        null,
+    )->pluck('id');
+
+    expect($matches)->toContain($related->id)
+        ->and($matches)->not->toContain($unrelated->id);
+});
+
+test('publishing a live fact queues a rewrite of related unsent drafts', function () {
+    Queue::fake();
+    $related = seedUnsentDraft();
+
+    $this->actingAs($this->admin)
+        ->postJson('/commerce-assist/facts', [
+            'body' => 'Cabinet preorders now ship the week of 21 April. Do not quote March.',
+            'conversation_id' => $related->id,
+            'intent_slugs' => ['preorder_status'],
+            'product_keywords' => ['Arcade Cabinet'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('ok', true);
+
+    expect(LiveFact::count())->toBe(1)
+        ->and(LiveFact::first()->body)->toContain('21 April');
+
+    Queue::assertPushed(RefreshDraftsForFactJob::class, function (RefreshDraftsForFactJob $job) use ($related) {
+        return in_array($related->id, $job->conversationIds, true);
+    });
+});
+
+test('current business facts are injected into the writer context and override older knowledge', function () {
+    IntentCatalog::ensureForWorkspace($this->workspace->id);
+    $intent = CommerceIntent::where('workspace_id', $this->workspace->id)->where('slug', 'preorder_status')->first();
+    $snapshot = new ShopifySnapshot(['payload' => ['found' => true, 'order_number' => 'SD1', 'products' => []]]);
+    $fact = new LiveFact([
+        'title' => 'Cabinet ship date',
+        'body' => 'Cabinet preorders now ship the week of 21 April.',
+    ]);
+
+    $built = app(ContextBuilder::class)->build(
+        $this->conversation->load('customer'),
+        'When does my cabinet ship?',
+        $snapshot,
+        ['subtype' => 'preorder_status'],
+        $intent,
+        $intent,
+        collect(),
+        collect(),
+        false,
+        14,
+        collect([$fact]),
+    );
+
+    expect($built['system'])
+        ->toContain('CURRENT BUSINESS FACTS')
+        ->toContain('week of 21 April')
+        ->toContain('Current business facts override older knowledge base articles')
+        ->and($built['sources']['facts'])->toContain('Cabinet ship date');
+});
+
+test('retired live facts are not applied to new drafts', function () {
+    $related = seedUnsentDraft();
+    LiveFact::create([
+        'workspace_id' => $this->workspace->id,
+        'body' => 'Old March date',
+        'product_keywords' => ['Arcade Cabinet'],
+        'retired_at' => now(),
+    ]);
+
+    $applied = app(LiveFactService::class)->forConversation($related->load('customer'));
+
+    expect($applied)->toHaveCount(0);
+});
+
