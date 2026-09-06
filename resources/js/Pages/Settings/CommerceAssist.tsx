@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Head, useForm } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
+import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
@@ -12,7 +13,9 @@ interface Props {
     providers: Record<string, string>;
     settings: {
         shopify_shop_domain: string | null;
+        shopify_resolved_domain: string | null;
         shopify_token_set: boolean;
+        shopify_configured: boolean;
         shopify_api_version: string;
         tracking_provider: string;
         tracking_key_set: boolean;
@@ -25,7 +28,18 @@ interface Props {
     };
 }
 
+type ShopifyTestStatus = 'idle' | 'loading' | 'ok' | 'fail' | 'unconfigured';
+
 export default function CommerceAssistSettings({ providers, settings }: Props) {
+    const [shopifyStatus, setShopifyStatus] = useState<ShopifyTestStatus>(
+        settings.shopify_configured ? 'idle' : 'unconfigured',
+    );
+    const [shopifyMessage, setShopifyMessage] = useState(
+        settings.shopify_configured
+            ? `Credentials saved${settings.shopify_resolved_domain ? ` for ${settings.shopify_resolved_domain}` : ''}. Testing…`
+            : 'Not connected. Save a shop domain and Admin API token, then test.',
+    );
+
     const { data, setData, post, processing, errors } = useForm({
         shopify_shop_domain: settings.shopify_shop_domain ?? '',
         shopify_access_token: '',
@@ -39,10 +53,53 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
         draft_only: settings.draft_only,
     });
 
+    const testShopify = useCallback(async () => {
+        if (!settings.shopify_configured) {
+            setShopifyStatus('unconfigured');
+            setShopifyMessage('Save a shop domain and Admin API token first.');
+            return;
+        }
+
+        setShopifyStatus('loading');
+        setShopifyMessage('Calling Shopify…');
+        try {
+            const res = await fetch('/settings/commerce-assist/test-shopify', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector<HTMLMetaElement>('[name="csrf-token"]')?.content ?? '',
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+            const body = (await res.json()) as { ok?: boolean; message?: string };
+            const ok = Boolean(body.ok);
+            setShopifyStatus(ok ? 'ok' : 'fail');
+            setShopifyMessage(body.message ?? (ok ? 'Connected.' : 'Connection failed.'));
+        } catch {
+            setShopifyStatus('fail');
+            setShopifyMessage('Network error. Could not reach this server.');
+        }
+    }, [settings.shopify_configured]);
+
+    useEffect(() => {
+        if (settings.shopify_configured) {
+            void testShopify();
+        }
+    }, [settings.shopify_configured, settings.shopify_shop_domain, settings.shopify_token_set, testShopify]);
+
     function submit(e: React.FormEvent) {
         e.preventDefault();
         post('/settings/commerce-assist');
     }
+
+    const shopifyBadge =
+        shopifyStatus === 'ok'
+            ? { variant: 'success' as const, label: 'Connected' }
+            : shopifyStatus === 'loading' || shopifyStatus === 'idle'
+              ? { variant: 'secondary' as const, label: 'Checking…' }
+              : shopifyStatus === 'fail'
+                ? { variant: 'destructive' as const, label: 'Failed' }
+                : { variant: 'outline' as const, label: 'Not connected' };
 
     return (
         <AppLayout>
@@ -59,7 +116,16 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
 
                 <form onSubmit={submit} className="max-w-xl space-y-6">
                     <section className="rounded-xl border border-border bg-card p-5 space-y-4">
-                        <h2 className="text-sm font-semibold">Shopify</h2>
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                                <h2 className="text-sm font-semibold">Shopify</h2>
+                                <p className="text-xs text-muted-foreground">
+                                    Shop domain is <span className="font-mono">your-store.myshopify.com</span>. The token must start with{' '}
+                                    <span className="font-mono">shpat_</span>.
+                                </p>
+                            </div>
+                            <Badge variant={shopifyBadge.variant}>{shopifyBadge.label}</Badge>
+                        </div>
                         <div className="space-y-1.5">
                             <Label htmlFor="shop">Shop domain</Label>
                             <Input
@@ -87,6 +153,29 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
                                 value={data.shopify_api_version}
                                 onChange={(e) => setData('shopify_api_version', e.target.value)}
                             />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 pt-1">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void testShopify()}
+                                disabled={shopifyStatus === 'loading' || !settings.shopify_configured}
+                                title={!settings.shopify_configured ? 'Save a shop domain and token first' : undefined}
+                            >
+                                {shopifyStatus === 'loading' ? 'Testing…' : 'Test connection'}
+                            </Button>
+                            <p
+                                className={
+                                    shopifyStatus === 'ok'
+                                        ? 'text-sm text-success font-medium'
+                                        : shopifyStatus === 'fail'
+                                          ? 'text-sm text-destructive'
+                                          : 'text-sm text-muted-foreground'
+                                }
+                            >
+                                {shopifyMessage}
+                            </p>
                         </div>
                     </section>
 

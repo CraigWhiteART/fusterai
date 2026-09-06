@@ -9,9 +9,46 @@ use RuntimeException;
 
 class ShopifyClient
 {
+    private const SHOP_QUERY = <<<'GQL'
+    query ShopPing {
+      shop {
+        name
+        myshopifyDomain
+        email
+        plan { displayName }
+      }
+    }
+    GQL;
+
     public function __construct(
         private readonly CommerceSetting $settings,
     ) {}
+
+    /**
+     * Cheap Admin API round-trip used by the settings "Test connection" button.
+     *
+     * @return array{name: string, domain: string, email: ?string, plan: ?string}
+     */
+    public function ping(): array
+    {
+        $data = $this->graphql(self::SHOP_QUERY);
+        $shop = is_array($data['shop'] ?? null) ? $data['shop'] : [];
+        $name = trim((string) ($shop['name'] ?? ''));
+        $domain = trim((string) ($shop['myshopifyDomain'] ?? ''));
+
+        if ($name === '' && $domain === '') {
+            throw new RuntimeException('Shopify responded but did not return shop details. Check Admin API scopes.');
+        }
+
+        $plan = is_array($shop['plan'] ?? null) ? ($shop['plan']['displayName'] ?? null) : null;
+
+        return [
+            'name' => $name !== '' ? $name : $domain,
+            'domain' => $domain !== '' ? $domain : (string) $this->settings->shopDomain(),
+            'email' => filled($shop['email'] ?? null) ? (string) $shop['email'] : null,
+            'plan' => is_string($plan) && $plan !== '' ? $plan : null,
+        ];
+    }
 
     /**
      * @param  array<string, mixed>  $variables
@@ -40,7 +77,7 @@ class ShopifyClient
 
             $response->throw();
         } catch (RequestException $e) {
-            throw new RuntimeException('Shopify request failed: '.$e->getMessage(), previous: $e);
+            throw new RuntimeException($this->httpErrorMessage($e), previous: $e);
         }
 
         /** @var array<string, mixed> $json */
@@ -58,5 +95,16 @@ class ShopifyClient
         $data = $json['data'] ?? [];
 
         return $data;
+    }
+
+    private function httpErrorMessage(RequestException $e): string
+    {
+        $status = $e->response?->status();
+
+        return match ($status) {
+            401, 403 => 'Shopify rejected the access token (HTTP '.$status.'). Use an Admin API access token starting with shpat_, not the API secret.',
+            404 => 'Shopify shop not found. Check the shop domain (your-store.myshopify.com).',
+            default => 'Shopify request failed: '.$e->getMessage(),
+        };
     }
 }

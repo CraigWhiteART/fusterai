@@ -410,6 +410,92 @@ test('admins can save commerce assist settings', function () {
         ->and($settings->decryptAccessToken())->toBe('shpat_secret');
 });
 
+test('shopify test-connection returns shop name when credentials work', function () {
+    CommerceSetting::forWorkspace($this->workspace->id)->update([
+        'shopify_shop_domain' => 'test-shop.myshopify.com',
+        'shopify_access_token' => Crypt::encryptString('shpat_test'),
+    ]);
+
+    Http::fake([
+        'https://test-shop.myshopify.com/admin/api/*' => Http::response([
+            'data' => [
+                'shop' => [
+                    'name' => 'The Soul Dial',
+                    'myshopifyDomain' => 'test-shop.myshopify.com',
+                    'email' => 'owner@example.com',
+                    'plan' => ['displayName' => 'Basic'],
+                ],
+            ],
+        ]),
+    ]);
+
+    $this->actingAs($this->admin)
+        ->postJson('/settings/commerce-assist/test-shopify')
+        ->assertOk()
+        ->assertJson([
+            'ok' => true,
+            'shop' => [
+                'name' => 'The Soul Dial',
+                'domain' => 'test-shop.myshopify.com',
+            ],
+        ])
+        ->assertJsonPath('message', 'Connected to The Soul Dial (test-shop.myshopify.com).');
+});
+
+test('shopify test-connection fails when no credentials are saved', function () {
+    $this->actingAs($this->admin)
+        ->postJson('/settings/commerce-assist/test-shopify')
+        ->assertOk()
+        ->assertJson([
+            'ok' => false,
+            'message' => 'Save a shop domain and Admin API access token first.',
+        ]);
+});
+
+test('shopify test-connection reports a rejected token', function () {
+    CommerceSetting::forWorkspace($this->workspace->id)->update([
+        'shopify_shop_domain' => 'test-shop.myshopify.com',
+        'shopify_access_token' => Crypt::encryptString('shpss_wrong'),
+    ]);
+
+    Http::fake([
+        'https://test-shop.myshopify.com/admin/api/*' => Http::response(['errors' => 'Unauthorized'], 401),
+    ]);
+
+    $response = $this->actingAs($this->admin)
+        ->postJson('/settings/commerce-assist/test-shopify')
+        ->assertOk()
+        ->assertJson(['ok' => false]);
+
+    expect($response->json('message'))->toContain('rejected the access token');
+});
+
+test('shopify test-connection is forbidden for non-admin users', function () {
+    $agent = User::factory()->create([
+        'workspace_id' => $this->workspace->id,
+        'role' => 'agent',
+    ]);
+
+    $this->actingAs($agent)
+        ->postJson('/settings/commerce-assist/test-shopify')
+        ->assertForbidden();
+});
+
+test('commerce assist settings page reports whether shopify is configured', function () {
+    CommerceSetting::forWorkspace($this->workspace->id)->update([
+        'shopify_shop_domain' => 'test-shop.myshopify.com',
+        'shopify_access_token' => Crypt::encryptString('shpat_test'),
+    ]);
+
+    $this->actingAs($this->admin)
+        ->get('/settings/commerce-assist')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Settings/CommerceAssist')
+            ->where('settings.shopify_configured', true)
+            ->where('settings.shopify_resolved_domain', 'test-shop.myshopify.com'));
+});
+
 test('admins can update intent rules', function () {
     IntentCatalog::ensureForWorkspace($this->workspace->id);
     $intent = CommerceIntent::where('workspace_id', $this->workspace->id)->where('slug', 'tracking.no_updates')->first();

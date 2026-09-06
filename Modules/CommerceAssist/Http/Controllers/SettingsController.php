@@ -3,6 +3,7 @@
 namespace Modules\CommerceAssist\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
@@ -11,7 +12,9 @@ use Inertia\Response;
 use Modules\CommerceAssist\Http\Requests\UpdateSettingsRequest;
 use Modules\CommerceAssist\Models\CommerceSetting;
 use Modules\CommerceAssist\Services\IntentCatalog;
+use Modules\CommerceAssist\Services\ShopifyClient;
 use Modules\CommerceAssist\Services\Tracking\TrackingProviderFactory;
+use Throwable;
 
 class SettingsController extends Controller
 {
@@ -27,7 +30,9 @@ class SettingsController extends Controller
             'providers' => TrackingProviderFactory::PROVIDERS,
             'settings' => [
                 'shopify_shop_domain' => $settings->shopify_shop_domain,
+                'shopify_resolved_domain' => $settings->shopDomain(),
                 'shopify_token_set' => $settings->tokenIsSet(),
+                'shopify_configured' => $settings->hasShopifyCredentials(),
                 'shopify_api_version' => $settings->shopify_api_version,
                 'tracking_provider' => $settings->tracking_provider ?: 'none',
                 'tracking_key_set' => $settings->trackingKeyIsSet(),
@@ -85,5 +90,38 @@ class SettingsController extends Controller
         $settings->update($payload);
 
         return back()->with('success', 'Commerce Assist settings saved.');
+    }
+
+    public function testShopify(Request $request): JsonResponse
+    {
+        $this->authorize('manage-settings');
+
+        $settings = CommerceSetting::forWorkspace((int) $request->user()->workspace_id);
+
+        if (! $settings->hasShopifyCredentials()) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Save a shop domain and Admin API access token first.',
+            ]);
+        }
+
+        try {
+            $shop = (new ShopifyClient($settings))->ping();
+            $label = $shop['name'];
+            if ($shop['domain'] !== '' && strcasecmp($shop['domain'], $shop['name']) !== 0) {
+                $label .= ' ('.$shop['domain'].')';
+            }
+
+            return response()->json([
+                'ok' => true,
+                'message' => 'Connected to '.$label.'.',
+                'shop' => $shop,
+            ]);
+        } catch (Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => $e->getMessage(),
+            ]);
+        }
     }
 }
