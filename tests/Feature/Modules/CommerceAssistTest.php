@@ -452,6 +452,18 @@ test('shopify test-connection returns shop name when credentials work', function
             ],
         ])
         ->assertJsonPath('message', 'Connected to The Soul Dial (test-shop.myshopify.com). Scopes: read_orders,read_customers,read_products.');
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'graphql.json')) {
+            return false;
+        }
+
+        $body = json_decode((string) $request->body());
+
+        return is_object($body)
+            && isset($body->query)
+            && ! isset($body->variables);
+    });
 });
 
 test('shopify test-connection fails when no credentials are saved', function () {

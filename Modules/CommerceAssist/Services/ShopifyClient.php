@@ -75,14 +75,18 @@ class ShopifyClient
         $version = $this->settings->shopify_api_version ?: '2025-01';
         $url = "https://{$domain}/admin/api/{$version}/graphql.json";
 
+        // Shopify rejects `variables: []`. An empty PHP array JSON-encodes as a
+        // list, so omit the key when unused and send a JSON object otherwise.
+        $payload = ['query' => $query];
+        if ($variables !== []) {
+            $payload['variables'] = (object) $variables;
+        }
+
         try {
             $response = Http::withHeaders([
                 'X-Shopify-Access-Token' => $token,
                 'Content-Type' => 'application/json',
-            ])->timeout(20)->post($url, [
-                'query' => $query,
-                'variables' => $variables,
-            ]);
+            ])->timeout(20)->post($url, $payload);
 
             $response->throw();
         } catch (RequestException $e) {
