@@ -4,18 +4,27 @@ namespace App\Console\Commands;
 
 use App\Domains\Conversation\Jobs\ProcessInboundEmailJob;
 use App\Domains\Mailbox\Models\Mailbox;
+use App\Domains\Mailbox\Support\ImapInboundMessage;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
+use Webklex\PHPIMAP\Client;
 use Webklex\PHPIMAP\ClientManager;
+use Webklex\PHPIMAP\IMAP;
 
 class FetchEmails extends Command
 {
-    protected $signature = 'emails:fetch {--mailbox=* : Specific mailbox IDs to fetch}';
+    protected $signature = 'emails:fetch
+                            {--mailbox=* : Specific mailbox IDs to fetch}
+                            {--limit=15 : Max unseen messages to process per mailbox}';
 
     protected $description = 'Fetch new emails from all active IMAP mailboxes';
 
+    private const MAX_MESSAGE_BYTES = 8_388_608;
+
     public function handle(): int
     {
+        ini_set('memory_limit', '512M');
+
         $query = Mailbox::where('active', true)->whereNotNull('imap_config');
 
         if ($ids = $this->option('mailbox')) {
@@ -40,7 +49,12 @@ class FetchEmails extends Command
     private function fetchForMailbox(Mailbox $mailbox): void
     {
         $config = $mailbox->imap_config;
-        if (! $config) {
+        if (! $config || empty($config['host']) || empty($config['username'])) {
+            $this->warn("  Skipping {$mailbox->email}: IMAP host/username missing.");
+            Log::warning('FetchEmails skipped mailbox with incomplete IMAP config', [
+                'mailbox_id' => $mailbox->id,
+            ]);
+
             return;
         }
 
@@ -55,43 +69,25 @@ class FetchEmails extends Command
                 'encryption' => $config['encryption'] ?? 'ssl',
                 'validate_cert' => $config['validate_cert'] ?? true,
                 'username' => $config['username'],
-                'password' => $config['password'],
+                'password' => $this->normalizePassword((string) ($config['password'] ?? '')),
                 'protocol' => 'imap',
             ]);
 
             $client->connect();
 
             $folder = $client->getFolder('INBOX');
-            $messages = $folder->query()->unseen()->get();
+            $uids = $folder->query()->unseen()->search();
+            $limit = max(1, (int) $this->option('limit'));
+            $batch = $uids->reverse()->take($limit)->values();
 
-            $this->info("  Found {$messages->count()} new message(s).");
+            $this->info("  {$uids->count()} unseen; processing {$batch->count()} (newest first).");
 
-            foreach ($messages as $message) {
-                ProcessInboundEmailJob::dispatch($mailbox->id, [
-                    'message_id' => $message->getMessageId()->first() ?? '',
-                    'subject' => (string) $message->getSubject()->first(),
-                    'from_email' => $message->getFrom()->first()->mail ?? '',
-                    'from_name' => $message->getFrom()->first()->personal ?? '',
-                    'body_html' => $message->hasHTMLBody() ? $message->getHTMLBody() : '',
-                    'body_text' => $message->hasTextBody() ? $message->getTextBody() : '',
-                    'in_reply_to' => $message->getInReplyTo()->first() ?? '',
-                    'references' => $message->getReferences()->first() ?? '',
-                    'attachments' => $this->extractAttachments($message),
-                    'cc' => $this->extractCc($message),
-                    'headers' => [
-                        'auto_submitted' => (string) ($message->getHeader('Auto-Submitted') ?? ''),
-                        'x_auto_response_suppress' => (string) ($message->getHeader('X-Auto-Response-Suppress') ?? ''),
-                        'precedence' => (string) ($message->getHeader('Precedence') ?? ''),
-                        'x_fusterai_auto_reply' => (string) ($message->getHeader('X-FusterAI-AutoReply') ?? ''),
-                    ],
-                ])->onQueue('email-inbound');
-
-                // Mark as seen
-                $message->setFlag('Seen');
+            foreach ($batch as $uid) {
+                $this->processUid($client, $mailbox, (int) $uid);
             }
 
             $client->disconnect();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->error("  Error fetching {$mailbox->email}: ".$e->getMessage());
             Log::error('FetchEmails failed', [
                 'mailbox_id' => $mailbox->id,
@@ -100,34 +96,83 @@ class FetchEmails extends Command
         }
     }
 
-    private function extractAttachments($message): array
+    private function processUid(Client $client, Mailbox $mailbox, int $uid): void
     {
-        $attachments = [];
-        foreach ($message->getAttachments() as $attachment) {
-            $attachments[] = [
-                'name' => $attachment->getName(),
-                'content' => base64_encode($attachment->getContent()),
-                'mime' => $attachment->getMimeType(),
-                'size' => $attachment->getSize(),
-            ];
-        }
+        try {
+            $size = $this->rfc822Size($client, $uid);
+            if ($size > self::MAX_MESSAGE_BYTES) {
+                $this->warn("  Skipping UID {$uid}: {$size} bytes exceeds limit.");
+                $this->markSeen($client, $uid);
+                Log::warning('FetchEmails skipped oversized message', [
+                    'mailbox_id' => $mailbox->id,
+                    'uid' => $uid,
+                    'size' => $size,
+                ]);
 
-        return $attachments;
+                return;
+            }
+
+            $message = $client->getFolder('INBOX')->query()->getMessageByUid($uid);
+
+            ProcessInboundEmailJob::dispatch(
+                $mailbox->id,
+                ImapInboundMessage::toPayload($message),
+            )->onQueue('email-inbound');
+
+            $message->setFlag('Seen');
+        } catch (\Throwable $e) {
+            $this->error("  UID {$uid}: ".$e->getMessage());
+            Log::error('FetchEmails message failed', [
+                'mailbox_id' => $mailbox->id,
+                'uid' => $uid,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
-    private function extractCc($message): array
+    private function rfc822Size(Client $client, int $uid): int
     {
-        $cc = [];
-        try {
-            foreach ($message->getCC() as $address) {
-                if (! empty($address->mail)) {
-                    $cc[] = ['email' => $address->mail, 'name' => $address->personal ?? ''];
-                }
-            }
-        } catch (\Throwable) {
-            // Some IMAP servers return malformed CC — skip silently
+        $raw = $client->getConnection()->sizes($uid)->validatedData();
+
+        if (is_numeric($raw)) {
+            return (int) $raw;
         }
 
-        return $cc;
+        if (! is_array($raw)) {
+            return 0;
+        }
+
+        $entry = $raw[$uid] ?? $raw[(string) $uid] ?? $raw[0] ?? $raw;
+
+        if (is_numeric($entry)) {
+            return (int) $entry;
+        }
+
+        if (is_array($entry)) {
+            foreach (['RFC822.SIZE', 'rfc822.size', 'SIZE', 'size'] as $key) {
+                if (isset($entry[$key]) && is_numeric($entry[$key])) {
+                    return (int) $entry[$key];
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private function markSeen(Client $client, int $uid): void
+    {
+        $client->getConnection()->store(['\\Seen'], $uid, $uid, '+', true, IMAP::ST_UID);
+    }
+
+    private function normalizePassword(string $password): string
+    {
+        $stripped = str_replace(' ', '', $password);
+
+        // Gmail app passwords are 16 letters, often copied with spaces.
+        if (preg_match('/^[a-z]{16}$/i', $stripped)) {
+            return $stripped;
+        }
+
+        return $password;
     }
 }
