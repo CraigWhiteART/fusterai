@@ -56,12 +56,21 @@ class ShopifyClient
      */
     public function graphql(string $query, array $variables = []): array
     {
-        $domain = $this->settings->shopDomain();
-        $token = $this->settings->decryptAccessToken();
+        return $this->requestGraphql($query, $variables, retried: false);
+    }
 
-        if (! $domain || ! $token) {
+    /**
+     * @param  array<string, mixed>  $variables
+     * @return array<string, mixed>
+     */
+    private function requestGraphql(string $query, array $variables, bool $retried): array
+    {
+        $domain = $this->settings->shopDomain();
+        if (! $domain) {
             throw new RuntimeException('Shopify credentials are not configured.');
         }
+
+        $token = app(ShopifyAccessTokenService::class)->tokenFor($this->settings);
 
         $version = $this->settings->shopify_api_version ?: '2025-01';
         $url = "https://{$domain}/admin/api/{$version}/graphql.json";
@@ -77,6 +86,13 @@ class ShopifyClient
 
             $response->throw();
         } catch (RequestException $e) {
+            $status = $e->response?->status();
+            if (! $retried && ($status === 401 || $status === 403)) {
+                app(ShopifyAccessTokenService::class)->tokenFor($this->settings, force: true);
+
+                return $this->requestGraphql($query, $variables, retried: true);
+            }
+
             throw new RuntimeException($this->httpErrorMessage($e), previous: $e);
         }
 
@@ -102,7 +118,7 @@ class ShopifyClient
         $status = $e->response?->status();
 
         return match ($status) {
-            401, 403 => 'Shopify rejected the access token (HTTP '.$status.'). Use an Admin API access token starting with shpat_, not the API secret.',
+            401, 403 => 'Shopify rejected the access token after a refresh. Check the client ID, secret, and that the app is installed on this shop.',
             404 => 'Shopify shop not found. Check the shop domain (your-store.myshopify.com).',
             default => 'Shopify request failed: '.$e->getMessage(),
         };

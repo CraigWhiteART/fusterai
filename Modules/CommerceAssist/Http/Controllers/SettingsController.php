@@ -12,6 +12,7 @@ use Inertia\Response;
 use Modules\CommerceAssist\Http\Requests\UpdateSettingsRequest;
 use Modules\CommerceAssist\Models\CommerceSetting;
 use Modules\CommerceAssist\Services\IntentCatalog;
+use Modules\CommerceAssist\Services\ShopifyAccessTokenService;
 use Modules\CommerceAssist\Services\ShopifyClient;
 use Modules\CommerceAssist\Services\Tracking\TrackingProviderFactory;
 use Throwable;
@@ -31,8 +32,11 @@ class SettingsController extends Controller
             'settings' => [
                 'shopify_shop_domain' => $settings->shopify_shop_domain,
                 'shopify_resolved_domain' => $settings->shopDomain(),
-                'shopify_token_set' => $settings->tokenIsSet(),
+                'shopify_client_id' => $settings->shopify_client_id,
+                'shopify_secret_set' => $settings->secretIsSet(),
                 'shopify_configured' => $settings->hasShopifyCredentials(),
+                'shopify_token_expires_at' => $settings->shopify_access_token_expires_at?->toIso8601String(),
+                'shopify_granted_scopes' => $settings->shopify_granted_scopes,
                 'shopify_api_version' => $settings->shopify_api_version,
                 'tracking_provider' => $settings->tracking_provider ?: 'none',
                 'tracking_key_set' => $settings->trackingKeyIsSet(),
@@ -64,6 +68,9 @@ class SettingsController extends Controller
 
         $payload = [
             'shopify_shop_domain' => $data['shopify_shop_domain'] ?? null,
+            'shopify_client_id' => filled($data['shopify_client_id'] ?? null)
+                ? trim((string) $data['shopify_client_id'])
+                : $settings->shopify_client_id,
             'shopify_api_version' => $data['shopify_api_version'] ?? '2025-01',
             'tracking_provider' => $provider,
             'tracking_store_uuid' => $data['tracking_store_uuid'] ?? $settings->tracking_store_uuid,
@@ -73,8 +80,15 @@ class SettingsController extends Controller
             'draft_only' => $request->boolean('draft_only'),
         ];
 
-        if (filled($data['shopify_access_token'] ?? null)) {
-            $payload['shopify_access_token'] = Crypt::encryptString($data['shopify_access_token']);
+        $secretPasted = filled($data['shopify_client_secret'] ?? null);
+        $clientIdChanged = array_key_exists('shopify_client_id', $data)
+            && trim((string) ($data['shopify_client_id'] ?? '')) !== trim((string) ($settings->shopify_client_id ?? ''));
+
+        if ($secretPasted) {
+            $payload['shopify_client_secret'] = Crypt::encryptString((string) $data['shopify_client_secret']);
+            $payload['shopify_access_token'] = null;
+            $payload['shopify_access_token_expires_at'] = null;
+            $payload['shopify_granted_scopes'] = null;
         }
 
         if (filled($data['tracking_api_key'] ?? null)) {
@@ -88,6 +102,15 @@ class SettingsController extends Controller
         }
 
         $settings->update($payload);
+        $settings->refresh();
+
+        if (($secretPasted || $clientIdChanged) && $settings->hasShopifyCredentials()) {
+            try {
+                app(ShopifyAccessTokenService::class)->refresh($settings);
+            } catch (Throwable $e) {
+                return back()->with('success', 'Commerce Assist settings saved. Shopify token request failed: '.$e->getMessage());
+            }
+        }
 
         return back()->with('success', 'Commerce Assist settings saved.');
     }
@@ -101,21 +124,31 @@ class SettingsController extends Controller
         if (! $settings->hasShopifyCredentials()) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Save a shop domain and Admin API access token first.',
+                'message' => 'Save a shop domain, client ID, and client secret first.',
             ]);
         }
 
         try {
+            $tokens = app(ShopifyAccessTokenService::class);
+            $tokens->refresh($settings);
             $shop = (new ShopifyClient($settings))->ping();
             $label = $shop['name'];
             if ($shop['domain'] !== '' && strcasecmp($shop['domain'], $shop['name']) !== 0) {
                 $label .= ' ('.$shop['domain'].')';
             }
 
+            $scopes = $settings->shopify_granted_scopes;
+            $message = 'Connected to '.$label.'.';
+            if (filled($scopes)) {
+                $message .= ' Scopes: '.$scopes.'.';
+            }
+
             return response()->json([
                 'ok' => true,
-                'message' => 'Connected to '.$label.'.',
+                'message' => $message,
                 'shop' => $shop,
+                'scopes' => $scopes,
+                'expires_at' => $settings->shopify_access_token_expires_at?->toIso8601String(),
             ]);
         } catch (Throwable $e) {
             return response()->json([

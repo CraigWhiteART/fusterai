@@ -14,8 +14,11 @@ interface Props {
     settings: {
         shopify_shop_domain: string | null;
         shopify_resolved_domain: string | null;
-        shopify_token_set: boolean;
+        shopify_client_id: string | null;
+        shopify_secret_set: boolean;
         shopify_configured: boolean;
+        shopify_token_expires_at: string | null;
+        shopify_granted_scopes: string | null;
         shopify_api_version: string;
         tracking_provider: string;
         tracking_key_set: boolean;
@@ -37,12 +40,13 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
     const [shopifyMessage, setShopifyMessage] = useState(
         settings.shopify_configured
             ? `Credentials saved${settings.shopify_resolved_domain ? ` for ${settings.shopify_resolved_domain}` : ''}. Testing…`
-            : 'Not connected. Save a shop domain and Admin API token, then test.',
+            : 'Not connected. Save the shop domain, client ID, and client secret, then test.',
     );
 
     const { data, setData, post, processing, errors } = useForm({
         shopify_shop_domain: settings.shopify_shop_domain ?? '',
-        shopify_access_token: '',
+        shopify_client_id: settings.shopify_client_id ?? '',
+        shopify_client_secret: '',
         shopify_api_version: settings.shopify_api_version,
         tracking_provider: settings.tracking_provider,
         tracking_api_key: '',
@@ -56,7 +60,7 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
     const testShopify = useCallback(async () => {
         if (!settings.shopify_configured) {
             setShopifyStatus('unconfigured');
-            setShopifyMessage('Save a shop domain and Admin API token first.');
+            setShopifyMessage('Save a shop domain, client ID, and client secret first.');
             return;
         }
 
@@ -85,7 +89,7 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
         if (settings.shopify_configured) {
             void testShopify();
         }
-    }, [settings.shopify_configured, settings.shopify_shop_domain, settings.shopify_token_set, testShopify]);
+    }, [settings.shopify_configured, settings.shopify_shop_domain, settings.shopify_client_id, settings.shopify_secret_set, testShopify]);
 
     function submit(e: React.FormEvent) {
         e.preventDefault();
@@ -120,8 +124,8 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
                             <div className="space-y-1">
                                 <h2 className="text-sm font-semibold">Shopify</h2>
                                 <p className="text-xs text-muted-foreground">
-                                    Shop domain is <span className="font-mono">your-store.myshopify.com</span>. The token must start with{' '}
-                                    <span className="font-mono">shpat_</span>.
+                                    Use the Client ID and Client secret from the Shopify Dev Dashboard. We request a 24-hour access
+                                    token automatically — you never paste a <span className="font-mono">shpat_</span> token.
                                 </p>
                             </div>
                             <Badge variant={shopifyBadge.variant}>{shopifyBadge.label}</Badge>
@@ -137,14 +141,27 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
                             {errors.shopify_shop_domain && <p className="text-xs text-destructive">{errors.shopify_shop_domain}</p>}
                         </div>
                         <div className="space-y-1.5">
-                            <Label htmlFor="token">Admin API access token</Label>
+                            <Label htmlFor="client_id">Client ID</Label>
                             <Input
-                                id="token"
-                                type="password"
-                                value={data.shopify_access_token}
-                                onChange={(e) => setData('shopify_access_token', e.target.value)}
-                                placeholder={settings.shopify_token_set ? 'Token saved — paste a new one to replace' : 'shpat_…'}
+                                id="client_id"
+                                value={data.shopify_client_id}
+                                onChange={(e) => setData('shopify_client_id', e.target.value)}
+                                placeholder="From Dev Dashboard → Settings"
+                                autoComplete="off"
                             />
+                            {errors.shopify_client_id && <p className="text-xs text-destructive">{errors.shopify_client_id}</p>}
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label htmlFor="client_secret">Client secret</Label>
+                            <Input
+                                id="client_secret"
+                                type="password"
+                                value={data.shopify_client_secret}
+                                onChange={(e) => setData('shopify_client_secret', e.target.value)}
+                                placeholder={settings.shopify_secret_set ? 'Secret saved — paste a new one to replace' : 'From Dev Dashboard → Settings'}
+                                autoComplete="new-password"
+                            />
+                            {errors.shopify_client_secret && <p className="text-xs text-destructive">{errors.shopify_client_secret}</p>}
                         </div>
                         <div className="space-y-1.5">
                             <Label htmlFor="version">API version</Label>
@@ -161,7 +178,7 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
                                 size="sm"
                                 onClick={() => void testShopify()}
                                 disabled={shopifyStatus === 'loading' || !settings.shopify_configured}
-                                title={!settings.shopify_configured ? 'Save a shop domain and token first' : undefined}
+                                title={!settings.shopify_configured ? 'Save a shop domain, client ID, and client secret first' : undefined}
                             >
                                 {shopifyStatus === 'loading' ? 'Testing…' : 'Test connection'}
                             </Button>
@@ -177,6 +194,15 @@ export default function CommerceAssistSettings({ providers, settings }: Props) {
                                 {shopifyMessage}
                             </p>
                         </div>
+                        {(settings.shopify_token_expires_at || settings.shopify_granted_scopes) && (
+                            <p className="text-xs text-muted-foreground">
+                                Access tokens last 24 hours and refresh automatically
+                                {settings.shopify_token_expires_at
+                                    ? ` (current token until ${new Date(settings.shopify_token_expires_at).toLocaleString()})`
+                                    : ''}
+                                {settings.shopify_granted_scopes ? `. Scopes: ${settings.shopify_granted_scopes}` : '.'}
+                            </p>
+                        )}
                     </section>
 
                     <section className="rounded-xl border border-border bg-card p-5 space-y-4">

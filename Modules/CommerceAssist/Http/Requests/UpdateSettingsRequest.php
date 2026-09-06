@@ -17,7 +17,8 @@ class UpdateSettingsRequest extends FormRequest
     {
         return [
             'shopify_shop_domain' => ['nullable', 'string', 'max:255'],
-            'shopify_access_token' => ['nullable', 'string', 'max:255'],
+            'shopify_client_id' => ['nullable', 'string', 'max:255'],
+            'shopify_client_secret' => ['nullable', 'string', 'max:255'],
             'shopify_api_version' => ['nullable', 'string', 'max:20'],
             'tracking_provider' => ['nullable', 'string', Rule::in(TrackingProviderFactory::keys())],
             'tracking_api_key' => ['nullable', 'string', 'max:255'],

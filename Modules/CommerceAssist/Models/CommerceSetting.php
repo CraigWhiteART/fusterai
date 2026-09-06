@@ -14,7 +14,11 @@ class CommerceSetting extends Model
     protected $fillable = [
         'workspace_id',
         'shopify_shop_domain',
+        'shopify_client_id',
+        'shopify_client_secret',
         'shopify_access_token',
+        'shopify_access_token_expires_at',
+        'shopify_granted_scopes',
         'shopify_api_version',
         'tracking_provider',
         'tracking_api_key',
@@ -30,9 +34,11 @@ class CommerceSetting extends Model
         'draft_only' => 'boolean',
         'tracking_stale_days' => 'integer',
         'example_edit_threshold' => 'integer',
+        'shopify_access_token_expires_at' => 'datetime',
     ];
 
     protected $hidden = [
+        'shopify_client_secret',
         'shopify_access_token',
         'tracking_api_key',
     ];
@@ -60,25 +66,43 @@ class CommerceSetting extends Model
 
     public function decryptAccessToken(): ?string
     {
-        if (blank($this->shopify_access_token)) {
-            return null;
-        }
+        return $this->decryptHidden('shopify_access_token');
+    }
 
-        try {
-            return Crypt::decryptString($this->shopify_access_token);
-        } catch (\Throwable) {
-            return null;
-        }
+    public function decryptClientSecret(): ?string
+    {
+        return $this->decryptHidden('shopify_client_secret');
     }
 
     public function hasShopifyCredentials(): bool
     {
-        return filled($this->shopify_shop_domain) && filled($this->decryptAccessToken());
+        return filled($this->shopify_shop_domain)
+            && filled($this->shopify_client_id)
+            && filled($this->decryptClientSecret());
+    }
+
+    public function secretIsSet(): bool
+    {
+        return filled($this->shopify_client_secret);
     }
 
     public function tokenIsSet(): bool
     {
         return filled($this->shopify_access_token);
+    }
+
+    private function decryptHidden(string $attribute): ?string
+    {
+        $value = $this->getAttribute($attribute);
+        if (blank($value)) {
+            return null;
+        }
+
+        try {
+            return Crypt::decryptString((string) $value);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     public function shopDomain(): ?string

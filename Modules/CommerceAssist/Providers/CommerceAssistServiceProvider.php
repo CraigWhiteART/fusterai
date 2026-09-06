@@ -4,7 +4,9 @@ namespace Modules\CommerceAssist\Providers;
 
 use App\Domains\Conversation\Models\Conversation;
 use App\Support\Hooks;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\ServiceProvider;
+use Modules\CommerceAssist\Console\RefreshShopifyTokensCommand;
 use Modules\CommerceAssist\Models\Generation;
 use Modules\CommerceAssist\Models\ShopifySnapshot;
 use Modules\CommerceAssist\Services\EditLearningService;
@@ -22,11 +24,19 @@ class CommerceAssistServiceProvider extends ServiceProvider
         // Singleton so a provider registered with extend() — a test fake, or a
         // future first-party carrier client — is seen by every resolver.
         $this->app->singleton(TrackingProviderFactory::class);
+
+        $this->commands([RefreshShopifyTokensCommand::class]);
     }
 
     public function boot(): void
     {
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
+
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
+            $schedule->command('commerce-assist:refresh-shopify-tokens')
+                ->hourly()
+                ->withoutOverlapping();
+        });
 
         Hooks::addFilter('ai.generate_reply', function (mixed $handled, Conversation $conversation): mixed {
             if ($handled === true) {

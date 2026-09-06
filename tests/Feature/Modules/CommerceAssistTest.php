@@ -174,10 +174,7 @@ test('extracts order numbers from customer email text', function () {
 });
 
 test('shopify lookup stores verified order facts and does not invent tracking', function () {
-    CommerceSetting::forWorkspace($this->workspace->id)->update([
-        'shopify_shop_domain' => 'test-shop.myshopify.com',
-        'shopify_access_token' => Crypt::encryptString('shpat_test'),
-    ]);
+    enableShopify();
 
     Http::fake([
         'https://test-shop.myshopify.com/admin/api/*' => Http::response(shopifyOrderPayload()),
@@ -392,10 +389,19 @@ test('use as AI example stores the customer message and final reply separately f
 });
 
 test('admins can save commerce assist settings', function () {
+    Http::fake([
+        'https://demo.myshopify.com/admin/oauth/access_token' => Http::response([
+            'access_token' => 'shpca_live',
+            'scope' => 'read_orders,read_customers',
+            'expires_in' => 86399,
+        ]),
+    ]);
+
     $this->actingAs($this->admin)
         ->post('/settings/commerce-assist', [
             'shopify_shop_domain' => 'demo.myshopify.com',
-            'shopify_access_token' => 'shpat_secret',
+            'shopify_client_id' => '11111111111111111111111111111111',
+            'shopify_client_secret' => 'shpss_secret',
             'shopify_api_version' => '2025-01',
             'tracking_stale_days' => 10,
             'example_edit_threshold' => 30,
@@ -406,17 +412,23 @@ test('admins can save commerce assist settings', function () {
 
     $settings = CommerceSetting::forWorkspace($this->workspace->id);
     expect($settings->shopify_shop_domain)->toBe('demo.myshopify.com')
+        ->and($settings->shopify_client_id)->toBe('11111111111111111111111111111111')
         ->and($settings->tracking_stale_days)->toBe(10)
-        ->and($settings->decryptAccessToken())->toBe('shpat_secret');
+        ->and($settings->decryptClientSecret())->toBe('shpss_secret')
+        ->and($settings->decryptAccessToken())->toBe('shpca_live')
+        ->and($settings->shopify_granted_scopes)->toBe('read_orders,read_customers')
+        ->and($settings->shopify_access_token_expires_at)->not->toBeNull();
 });
 
 test('shopify test-connection returns shop name when credentials work', function () {
-    CommerceSetting::forWorkspace($this->workspace->id)->update([
-        'shopify_shop_domain' => 'test-shop.myshopify.com',
-        'shopify_access_token' => Crypt::encryptString('shpat_test'),
-    ]);
+    enableShopify(['shopify_access_token' => null, 'shopify_access_token_expires_at' => null]);
 
     Http::fake([
+        'https://test-shop.myshopify.com/admin/oauth/access_token' => Http::response([
+            'access_token' => 'shpca_test',
+            'scope' => 'read_orders,read_customers,read_products',
+            'expires_in' => 86399,
+        ]),
         'https://test-shop.myshopify.com/admin/api/*' => Http::response([
             'data' => [
                 'shop' => [
@@ -439,7 +451,7 @@ test('shopify test-connection returns shop name when credentials work', function
                 'domain' => 'test-shop.myshopify.com',
             ],
         ])
-        ->assertJsonPath('message', 'Connected to The Soul Dial (test-shop.myshopify.com).');
+        ->assertJsonPath('message', 'Connected to The Soul Dial (test-shop.myshopify.com). Scopes: read_orders,read_customers,read_products.');
 });
 
 test('shopify test-connection fails when no credentials are saved', function () {
@@ -448,18 +460,18 @@ test('shopify test-connection fails when no credentials are saved', function () 
         ->assertOk()
         ->assertJson([
             'ok' => false,
-            'message' => 'Save a shop domain and Admin API access token first.',
+            'message' => 'Save a shop domain, client ID, and client secret first.',
         ]);
 });
 
-test('shopify test-connection reports a rejected token', function () {
-    CommerceSetting::forWorkspace($this->workspace->id)->update([
-        'shopify_shop_domain' => 'test-shop.myshopify.com',
-        'shopify_access_token' => Crypt::encryptString('shpss_wrong'),
-    ]);
+test('shopify test-connection reports rejected client credentials', function () {
+    enableShopify(['shopify_access_token' => null, 'shopify_access_token_expires_at' => null]);
 
     Http::fake([
-        'https://test-shop.myshopify.com/admin/api/*' => Http::response(['errors' => 'Unauthorized'], 401),
+        'https://test-shop.myshopify.com/admin/oauth/access_token' => Http::response([
+            'error' => 'invalid_client',
+            'error_description' => 'Invalid client',
+        ], 401),
     ]);
 
     $response = $this->actingAs($this->admin)
@@ -467,7 +479,7 @@ test('shopify test-connection reports a rejected token', function () {
         ->assertOk()
         ->assertJson(['ok' => false]);
 
-    expect($response->json('message'))->toContain('rejected the access token');
+    expect($response->json('message'))->toContain('rejected the client ID or secret');
 });
 
 test('shopify test-connection is forbidden for non-admin users', function () {
@@ -482,10 +494,7 @@ test('shopify test-connection is forbidden for non-admin users', function () {
 });
 
 test('commerce assist settings page reports whether shopify is configured', function () {
-    CommerceSetting::forWorkspace($this->workspace->id)->update([
-        'shopify_shop_domain' => 'test-shop.myshopify.com',
-        'shopify_access_token' => Crypt::encryptString('shpat_test'),
-    ]);
+    enableShopify();
 
     $this->actingAs($this->admin)
         ->get('/settings/commerce-assist')
@@ -493,7 +502,64 @@ test('commerce assist settings page reports whether shopify is configured', func
         ->assertInertia(fn ($page) => $page
             ->component('Settings/CommerceAssist')
             ->where('settings.shopify_configured', true)
+            ->where('settings.shopify_client_id', '11111111111111111111111111111111')
+            ->where('settings.shopify_secret_set', true)
             ->where('settings.shopify_resolved_domain', 'test-shop.myshopify.com'));
+});
+
+test('shopify reuses a cached access token until it is near expiry', function () {
+    enableShopify();
+    Http::fake();
+
+    $token = app(\Modules\CommerceAssist\Services\ShopifyAccessTokenService::class)
+        ->tokenFor(CommerceSetting::forWorkspace($this->workspace->id));
+
+    expect($token)->toBe('shpca_test');
+    Http::assertNothingSent();
+});
+
+test('shopify requests a new access token when the cached one has expired', function () {
+    enableShopify(['shopify_access_token_expires_at' => now()->subMinute()]);
+
+    Http::fake([
+        'https://test-shop.myshopify.com/admin/oauth/access_token' => Http::response([
+            'access_token' => 'shpca_rotated',
+            'scope' => 'read_orders',
+            'expires_in' => 86399,
+        ]),
+    ]);
+
+    $token = app(\Modules\CommerceAssist\Services\ShopifyAccessTokenService::class)
+        ->tokenFor(CommerceSetting::forWorkspace($this->workspace->id));
+
+    expect($token)->toBe('shpca_rotated')
+        ->and(CommerceSetting::forWorkspace($this->workspace->id)->decryptAccessToken())->toBe('shpca_rotated');
+});
+
+test('the refresh command renews tokens that expire within two hours', function () {
+    enableShopify(['shopify_access_token_expires_at' => now()->addMinutes(30)]);
+
+    Http::fake([
+        'https://test-shop.myshopify.com/admin/oauth/access_token' => Http::response([
+            'access_token' => 'shpca_scheduled',
+            'scope' => 'read_orders',
+            'expires_in' => 86399,
+        ]),
+    ]);
+
+    $this->artisan('commerce-assist:refresh-shopify-tokens')->assertSuccessful();
+
+    expect(CommerceSetting::forWorkspace($this->workspace->id)->decryptAccessToken())->toBe('shpca_scheduled');
+});
+
+test('the refresh command skips a token that is still fresh', function () {
+    enableShopify();
+    Http::fake();
+
+    $this->artisan('commerce-assist:refresh-shopify-tokens')->assertSuccessful();
+
+    Http::assertNothingSent();
+    expect(CommerceSetting::forWorkspace($this->workspace->id)->decryptAccessToken())->toBe('shpca_test');
 });
 
 test('admins can update intent rules', function () {
@@ -721,11 +787,21 @@ test('retired live facts are not applied to new drafts', function () {
 // Carrier tracking
 // ---------------------------------------------------------------------------
 
+function enableShopify(array $overrides = []): void
+{
+    CommerceSetting::forWorkspace(test()->workspace->id)->update(array_merge([
+        'shopify_shop_domain' => 'test-shop.myshopify.com',
+        'shopify_client_id' => '11111111111111111111111111111111',
+        'shopify_client_secret' => Crypt::encryptString('shpss_secret'),
+        'shopify_access_token' => Crypt::encryptString('shpca_test'),
+        'shopify_access_token_expires_at' => now()->addHours(23),
+        'shopify_granted_scopes' => 'read_orders,read_customers,read_products',
+    ], $overrides));
+}
+
 function enableTrack123(): void
 {
-    CommerceSetting::forWorkspace(test()->workspace->id)->update([
-        'shopify_shop_domain' => 'test-shop.myshopify.com',
-        'shopify_access_token' => Crypt::encryptString('shpat_test'),
+    enableShopify([
         'tracking_provider' => 'track123',
         'tracking_api_key' => Crypt::encryptString('t123_secret'),
     ]);
