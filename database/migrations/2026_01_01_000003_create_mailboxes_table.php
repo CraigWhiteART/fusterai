@@ -14,8 +14,8 @@ return new class extends Migration
             $table->string('name');
             $table->string('email');
             $table->text('signature')->nullable();
-            $table->jsonb('imap_config')->nullable();   // encrypted at model level
-            $table->jsonb('smtp_config')->nullable();   // encrypted at model level
+            $table->text('imap_config')->nullable();    // encrypted at model level (Crypt::encryptString is not JSON)
+            $table->text('smtp_config')->nullable();    // encrypted at model level (Crypt::encryptString is not JSON)
             $table->jsonb('auto_reply_config')->nullable();
             $table->jsonb('ai_config')->nullable();
             $table->string('channel_type')->default('email');

@@ -2,6 +2,7 @@
 
 use App\Domains\Mailbox\Models\Mailbox;
 use App\Models\Workspace;
+use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->workspace = Workspace::factory()->create();
@@ -102,6 +103,42 @@ test('admin can update mailbox name and signature', function () {
 
     expect($mailbox->fresh()->name)->toBe('Updated Name');
     expect($mailbox->fresh()->signature)->toBe('Best regards');
+});
+
+test('admin can update mailbox imap and smtp config', function () {
+    $mailbox = Mailbox::factory()->create(['workspace_id' => $this->workspace->id]);
+
+    $imap = [
+        'host' => 'imap.gmail.com',
+        'port' => '993',
+        'encryption' => 'ssl',
+        'username' => 'support@example.com',
+        'password' => 'app-password',
+    ];
+    $smtp = [
+        'host' => 'smtp.gmail.com',
+        'port' => '587',
+        'encryption' => 'tls',
+        'username' => 'support@example.com',
+        'password' => 'app-password',
+    ];
+
+    $this->actingAs($this->admin)
+        ->patch("/mailboxes/{$mailbox->id}", [
+            'name' => $mailbox->name,
+            'email' => $mailbox->email,
+            'imap_config' => $imap,
+            'smtp_config' => $smtp,
+        ])
+        ->assertRedirect();
+
+    $fresh = $mailbox->fresh();
+    expect($fresh->imap_config)->toMatchArray($imap);
+    expect($fresh->smtp_config)->toMatchArray($smtp);
+
+    $rawImap = DB::table('mailboxes')->where('id', $mailbox->id)->value('imap_config');
+    expect($rawImap)->not->toContain('app-password');
+    expect($rawImap)->not->toContain('imap.gmail.com');
 });
 
 test('agent cannot update a mailbox', function () {
