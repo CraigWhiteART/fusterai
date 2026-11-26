@@ -78,6 +78,10 @@ return [
         'claude-opus-5-5' => ['input' => 4.00, 'output' => 20.00, 'cache_read' => 0.20, 'cache_write' => 5.00],
         'claude-sonnet-5-5' => ['input' => 2.00, 'output' => 10.00, 'cache_read' => 0.10, 'cache_write' => 2.50],
         'claude-haiku-5-5' => ['input' => 0.10, 'output' => 0.50, 'cache_read' => 0.01, 'cache_write' => 0.125],
+        // OpenRouter list prices (openrouter.ai/api/v1/models).
+        'gpt-5.6-luna' => ['input' => 0.20, 'output' => 1.20, 'cache_read' => 0.02, 'cache_write' => 0.20],
+        'gpt-5.6-terra' => ['input' => 2.00, 'output' => 12.00, 'cache_read' => 0.20, 'cache_write' => 2.00],
+        'gpt-5.6-sol' => ['input' => 4.00, 'output' => 20.00, 'cache_read' => 0.40, 'cache_write' => 4.00],
         'default' => ['input' => 4.00, 'output' => 20.00, 'cache_read' => 0.20, 'cache_write' => 5.00],
     ],
 

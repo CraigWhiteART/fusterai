@@ -53,6 +53,12 @@ final class UsageMeter
     public static function microUsd(?string $model, Usage $usage): int
     {
         $prices = (array) config('agent.prices', []);
+        // OpenRouter ids ("anthropic/claude-haiku-5.5", "...:batch") price
+        // like the vendor's own id ("claude-haiku-5-5").
+        if ($model !== null && ! isset($prices[$model])) {
+            $base = (string) preg_replace('/:.*$/', '', substr($model, (int) strrpos('/'.$model, '/')));
+            $model = isset($prices[$base]) ? $base : str_replace('.', '-', $base);
+        }
         $price = $prices[(string) $model] ?? null;
 
         if ($price === null && $model !== null) {
