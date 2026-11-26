@@ -6,6 +6,7 @@ use App\Domains\Conversation\Models\Conversation;
 use App\Domains\Customer\Models\Customer;
 use App\Domains\Mailbox\Models\Mailbox;
 use App\Domains\Mailbox\Sync\Fake\FakeMailSource;
+use App\Domains\Mailbox\Sync\InboxReconciler;
 use App\Domains\Mailbox\Sync\Jobs\IngestMailMessageJob;
 use App\Domains\Mailbox\Sync\MailSyncService;
 use App\Domains\Mailbox\Sync\Models\MailMessage;
@@ -144,20 +145,95 @@ test('customer mail already archived in Gmail is closed history, not work', func
     Queue::assertPushed(RunAutomationRulesJob::class, 1);
 });
 
-test('mail:close-archived closes open conversations whose mail has left the Inbox', function () {
-    roaDeliver($this->mailbox, [
-        [roaRaw(['From' => 'One <one@example.com>']), '81'],
-        [roaRaw(['From' => 'Two <two@example.com>']), '82'],
-    ]);
-    $one = Conversation::whereHas('customer', fn ($q) => $q->where('email', 'one@example.com'))->sole();
-    MailMessage::where('conversation_id', $one->id)->update(['labels' => json_encode(['Label_1'])]);
+/** Sync, ingest, then the Inbox check, as emails:fetch and its worker do. */
+function roaFetch(Mailbox $mailbox, ?int $maxClose = 25): array
+{
+    foreach (app(MailSyncService::class)->syncNew($mailbox)->newMessageIds as $id) {
+        app()->call([new IngestMailMessageJob($id), 'handle']);
+    }
 
-    $this->artisan('mail:close-archived')->assertSuccessful();
+    return app(InboxReconciler::class)->reconcile($mailbox, maxClose: $maxClose);
+}
+
+function roaSource(): FakeMailSource
+{
+    $source = new FakeMailSource;
+    app()->instance(MailSyncService::class, (new MailSyncService($source))->configure(initialLookbackDays: 100_000));
+
+    return $source;
+}
+
+test('archiving in Gmail closes the conversation; a new customer message reopens it', function () {
+    $source = roaSource();
+    $source->addMessage(roaRaw(['From' => 'One <one@example.com>', 'Message-ID' => '<one-1@mail.example.com>']), 8001, '1900000000000008001', '81', ['\\Inbox']);
+    $source->addMessage(roaRaw(['From' => 'Two <two@example.com>']), 8002, '1900000000000008002', '82', ['\\Inbox']);
+
+    roaFetch($this->mailbox);
+    $one = Conversation::whereHas('customer', fn ($q) => $q->where('email', 'one@example.com'))->sole();
     expect(Conversation::where('status', 'open')->count())->toBe(2);
 
-    $this->artisan('mail:close-archived', ['--apply' => true])->assertSuccessful();
+    // Mail that has only just been synced is never closed.
+    $source->setLabels(8001, []);
+    roaFetch($this->mailbox);
+    expect($one->refresh()->status->value)->toBe('open');
 
-    expect($one->refresh()->status->value)->toBe('closed')
-        ->and($one->imported)->toBeTrue()
-        ->and(Conversation::where('status', 'open')->count())->toBe(1);
+    MailMessage::query()->update(['created_at' => now()->subHour()]);
+    $this->artisan('mail:close-archived', ['--mailbox' => [$this->mailbox->id]])->assertSuccessful();
+    expect($one->refresh()->status->value)->toBe('open'); // dry run
+
+    $report = roaFetch($this->mailbox);
+
+    expect($report['closed'])->toBe(1)
+        ->and($one->refresh()->status->value)->toBe('closed')
+        ->and(Conversation::where('status', 'open')->count())->toBe(1)
+        ->and(MailMessage::where('gm_msgid', '1900000000000008001')->sole()->hasLabel('\\Inbox'))->toBeFalse();
+
+    // The customer writes again: back to open.
+    $source->addMessage(roaRaw([
+        'From' => 'One <one@example.com>', 'Subject' => 'Re: Help needed', 'Date' => now()->subMinute()->toRfc2822String(),
+        'In-Reply-To' => '<one-1@mail.example.com>', 'References' => '<one-1@mail.example.com>',
+    ]), 8003, '1900000000000008003', '81', ['\\Inbox']);
+    roaFetch($this->mailbox);
+
+    expect($one->refresh()->status->value)->toBe('open')
+        ->and($one->threads()->count())->toBe(2);
+});
+
+test('the scheduled Inbox check refuses to close more conversations than its limit', function () {
+    $source = roaSource();
+    $source->addMessage(roaRaw(['From' => 'One <one@example.com>']), 8101, '1900000000000008101', '91', ['\\Inbox']);
+    $source->addMessage(roaRaw(['From' => 'Two <two@example.com>']), 8102, '1900000000000008102', '92', ['\\Inbox']);
+    roaFetch($this->mailbox);
+    MailMessage::query()->update(['created_at' => now()->subHour()]);
+    $source->setLabels(8101, [])->setLabels(8102, []);
+
+    $report = roaFetch($this->mailbox, maxClose: 1);
+    expect($report['capped'])->toBeTrue()
+        ->and(Conversation::where('status', 'open')->count())->toBe(2);
+
+    $this->artisan('mail:close-archived', ['--mailbox' => [$this->mailbox->id], '--apply' => true])->assertSuccessful();
+    expect(Conversation::where('status', 'open')->count())->toBe(0);
+});
+
+test('mail:close-archived --include-unsynced keeps pre-ledger conversations that are still in the Inbox', function () {
+    $source = roaSource();
+    $source->addMessage(roaRaw(['Message-ID' => '<still-here@mail.example.com>']), 8201, '1900000000000008201', '95', ['\\Inbox']);
+
+    $make = function (string $messageId) {
+        $conversation = Conversation::factory()->create(['mailbox_id' => $this->mailbox->id, 'workspace_id' => $this->mailbox->workspace_id, 'status' => 'open']);
+        $thread = $conversation->threads()->create(['type' => 'message', 'body' => 'x', 'source' => 'email', 'meta' => ['message_id' => '<'.$messageId.'>']]);
+        $thread->forceFill(['created_at' => now()->subDays(5)])->save();
+
+        return $conversation;
+    };
+    $kept = $make('still-here@mail.example.com');
+    $gone = $make('archived-long-ago@mail.example.com');
+
+    $this->artisan('mail:close-archived', ['--mailbox' => [$this->mailbox->id], '--apply' => true])->assertSuccessful();
+    expect($gone->refresh()->status->value)->toBe('open');
+
+    $this->artisan('mail:close-archived', ['--mailbox' => [$this->mailbox->id], '--include-unsynced' => true, '--apply' => true])->assertSuccessful();
+
+    expect($kept->refresh()->status->value)->toBe('open')
+        ->and($gone->refresh()->status->value)->toBe('closed');
 });

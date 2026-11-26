@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Domains\Mailbox\Models\Mailbox;
+use App\Domains\Mailbox\Sync\InboxReconciler;
 use App\Domains\Mailbox\Sync\Jobs\IngestMailMessageJob;
 use App\Domains\Mailbox\Sync\MailSyncLock;
 use App\Domains\Mailbox\Sync\MailSyncService;
@@ -116,11 +117,40 @@ class FetchEmails extends Command
             if ($report->uidValidityResets !== []) {
                 $this->warn('  UIDVALIDITY changed: '.implode(', ', $report->uidValidityResets));
             }
+
+            $this->closeArchived($mailbox);
         } finally {
             $lock->release();
         }
 
         return true;
+    }
+
+    /**
+     * Archived in Gmail = done (mailsync.inbox_only). A failure here never
+     * fails the sync, and nothing is closed when the number looks wrong.
+     */
+    private function closeArchived(Mailbox $mailbox): void
+    {
+        if (! config('mailsync.inbox_only', true)) {
+            return;
+        }
+
+        try {
+            $r = app(InboxReconciler::class)->reconcile($mailbox, maxClose: (int) config('mailsync.max_archive_closes_per_run', 25));
+        } catch (Throwable $e) {
+            $this->warn('  Inbox check failed: '.$e->getMessage());
+            Log::warning('Inbox reconcile failed', ['mailbox_id' => $mailbox->id, 'error' => $e->getMessage()]);
+
+            return;
+        }
+
+        if ($r['capped']) {
+            $this->warn("  {$r['to_close']} conversations look archived; too many to close automatically. Run mail:close-archived.");
+            Log::warning('Inbox reconcile over the per-run limit; nothing closed', ['mailbox_id' => $mailbox->id, 'to_close' => $r['to_close']]);
+        } elseif ($r['closed'] > 0) {
+            $this->info("  {$r['closed']} archived in Gmail, closed.");
+        }
     }
 
     /**

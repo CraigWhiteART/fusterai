@@ -8,6 +8,7 @@ use App\Domains\Mailbox\Sync\Contracts\MailSourceFactory;
 use App\Domains\Mailbox\Sync\Data\FolderRef;
 use App\Domains\Mailbox\Sync\Data\FolderState;
 use App\Domains\Mailbox\Sync\Data\MailEnvelope;
+use App\Domains\Mailbox\Sync\Exceptions\MailSourceException;
 use App\Domains\Mailbox\Sync\Imap\ImapMailSourceFactory;
 use App\Domains\Mailbox\Sync\Models\MailMessage;
 use App\Domains\Mailbox\Sync\Models\MailSyncState;
@@ -108,6 +109,54 @@ class MailSyncService
         sort($report->newMessageIds);
 
         return $report;
+    }
+
+    /** Above this many Inbox messages the snapshot is not taken. */
+    public const INBOX_SNAPSHOT_MAX = 3000;
+
+    /**
+     * What is in the Gmail Inbox right now: the X-GM-MSGID and Message-ID of
+     * every message. Null when the server is not Gmail, or the Inbox is too
+     * large to read cheaply. Throws when the Inbox cannot be read; an empty
+     * result always means an empty Inbox.
+     *
+     * @return array{gm: array<string, true>, message_ids: array<string, true>}|null
+     */
+    public function inboxSnapshot(Mailbox $mailbox): ?array
+    {
+        $source = $this->sources->forMailbox($mailbox);
+
+        try {
+            if (! $source->supportsGmailExtensions()) {
+                return null;
+            }
+
+            $fs = $source->folderState(new FolderRef('INBOX', FolderRef::ROLE_INBOX, [], 'INBOX'));
+            if ($fs->exists > self::INBOX_SNAPSHOT_MAX) {
+                return null;
+            }
+
+            $snapshot = ['gm' => [], 'message_ids' => []];
+            $envelopes = $fs->exists > 0 ? $source->fetchEnvelopes($fs, 1, $fs->maxUid()) : [];
+            if (count($envelopes) < $fs->exists) {
+                throw new MailSourceException('Inbox snapshot incomplete: '.count($envelopes)." of {$fs->exists} messages returned");
+            }
+
+            foreach ($envelopes as $envelope) {
+                if ($envelope->gmMsgid === null) {
+                    throw new MailSourceException('Inbox snapshot has a message without X-GM-MSGID');
+                }
+                $snapshot['gm'][$envelope->gmMsgid] = true;
+                $messageId = $this->parser->parseHeaders($envelope->rawHeaders)->messageId;
+                if ($messageId !== null) {
+                    $snapshot['message_ids'][$messageId] = true;
+                }
+            }
+
+            return $snapshot;
+        } finally {
+            $source->close();
+        }
     }
 
     /** @param list<string> $aliases */

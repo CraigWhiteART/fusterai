@@ -17,7 +17,14 @@ return [
     // Gmail: only mail in the Inbox is work. Customer mail that is already
     // archived when it is synced is stored as a closed, imported conversation
     // (no AI draft, notification or auto-reply).
+    // A conversation is also closed once all its customer mail has been
+    // archived in Gmail (InboxReconciler, run by emails:fetch).
     'inbox_only' => (bool) env('MAIL_SYNC_INBOX_ONLY', true),
+
+    // emails:fetch closes at most this many archived conversations per run;
+    // above it nothing is closed and a warning is logged (mail:close-archived
+    // has no limit).
+    'max_archive_closes_per_run' => (int) env('MAIL_SYNC_MAX_ARCHIVE_CLOSES', 25),
 
     // Mail older than this when it is ingested (the first-sync lookback, or
     // catching up after an outage) still becomes a conversation, but gets no

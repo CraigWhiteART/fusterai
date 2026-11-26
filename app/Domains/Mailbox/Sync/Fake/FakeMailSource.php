@@ -150,9 +150,17 @@ final class FakeMailSource implements MailSource, MailSourceFactory
         return $this;
     }
 
+    /** @param list<string> $labels */
+    public function setLabels(int $uid, array $labels, ?string $folder = null): self
+    {
+        $this->folders[$folder ?? $this->defaultFolder()]['messages'][$uid]['labels'] = $labels;
+
+        return $this;
+    }
+
     public function maxUid(?string $folder = null): int
     {
-        $uids = array_keys($this->folders[$folder ?? $this->defaultFolder()]['messages']);
+        $uids = array_keys($this->folder($folder ?? $this->defaultFolder())['messages']);
 
         return $uids === [] ? 0 : max($uids);
     }
@@ -296,6 +304,17 @@ final class FakeMailSource implements MailSource, MailSourceFactory
     /** @return array{ref: FolderRef, uidvalidity: int, messages: array<int, mixed>} */
     private function folder(string $name): array
     {
+        // Gmail: INBOX is a view of All Mail, the messages labelled \Inbox.
+        if ($this->gmail && $name === 'INBOX') {
+            $all = $this->folders[self::ALL_MAIL];
+
+            return [
+                'ref' => new FolderRef('INBOX', FolderRef::ROLE_INBOX, [], 'INBOX', '/'),
+                'uidvalidity' => $all['uidvalidity'],
+                'messages' => array_filter($all['messages'], fn (array $m) => in_array('\Inbox', $m['labels'], true)),
+            ];
+        }
+
         if (! isset($this->folders[$name])) {
             throw new MailSourceException("Fake has no folder {$name}");
         }
