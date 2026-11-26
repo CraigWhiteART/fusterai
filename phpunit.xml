@@ -26,6 +26,7 @@
         <env name="DB_DATABASE" value="fusterai_test"/>
         <env name="DB_URL" value=""/>
         <env name="MAIL_MAILER" value="array"/>
+        <env name="MAIL_SYNC_LIVE_EFFECTS_MAX_AGE_HOURS" value="0"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SCOUT_DRIVER" value="collection"/>
         <env name="SESSION_DRIVER" value="array"/>

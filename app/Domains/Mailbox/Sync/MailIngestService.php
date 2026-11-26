@@ -73,6 +73,12 @@ class MailIngestService
 
     public function ingest(int $mailMessageId, bool $historical = false, ?int $backfillRunId = null, bool $keepActive = false): IngestResult
     {
+        // Archived in Gmail = dealt with: kept as closed history so threading
+        // and learning still see it, but it is not work and nothing acts on it.
+        if (! $historical && $this->isArchived($mailMessageId)) {
+            $historical = true;
+        }
+
         if (! $historical) {
             return $this->ingestRow($mailMessageId, false, null, false);
         }
@@ -147,6 +153,7 @@ class MailIngestService
                     $result->thread,
                     $result->newConversation,
                     allowAutoReply: $headers->header('x-auto-response-suppress') === null,
+                    stale: $this->isStale($row),
                 );
             } else {
                 $this->effects->afterAgentMessage($result->conversation, $result->thread);
@@ -471,6 +478,32 @@ class MailIngestService
         }
 
         return $at->isFuture() ? now() : $at->copy();
+    }
+
+    /**
+     * An inbound Gmail message that is no longer in the Inbox (see
+     * mailsync.inbox_only). Other servers have no labels: never archived.
+     */
+    private function isArchived(int $mailMessageId): bool
+    {
+        if (! config('mailsync.inbox_only', true)) {
+            return false;
+        }
+
+        $row = MailMessage::query()->find($mailMessageId, ['id', 'gm_msgid', 'direction', 'labels']);
+
+        return $row !== null
+            && $row->gm_msgid !== null
+            && $row->direction === MailDirection::Inbound
+            && ! $row->hasLabel('\\Inbox');
+    }
+
+    /** Too old to act on: see mailsync.live_effects_max_age_hours. */
+    private function isStale(MailMessage $row): bool
+    {
+        $hours = (int) config('mailsync.live_effects_max_age_hours', 24);
+
+        return $hours > 0 && $this->orderTime($row)->lt(now()->subHours($hours));
     }
 
     /** @return array{0: string, 1: string} raw HTML body, cleaned plain text */

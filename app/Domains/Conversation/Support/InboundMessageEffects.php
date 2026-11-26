@@ -31,7 +31,7 @@ final class InboundMessageEffects
      * marked spam before anything else runs, and nothing that acts on the
      * message (automation, AI, notification, auto-reply) runs for it.
      */
-    public function afterCustomerMessage(Conversation $conversation, Thread $thread, bool $isNewConversation, bool $allowAutoReply = true): void
+    public function afterCustomerMessage(Conversation $conversation, Thread $thread, bool $isNewConversation, bool $allowAutoReply = true, bool $stale = false): void
     {
         $sender = $thread->customer_id !== null ? Customer::find($thread->customer_id) : null;
         $owner = $conversation->customer_id === $thread->customer_id ? $sender : Customer::find($conversation->customer_id);
@@ -49,7 +49,9 @@ final class InboundMessageEffects
         broadcast(new NewThreadReceived($thread->load(['user', 'customer', 'attachments'])));
         broadcast(new ConversationUpdated($conversation->fresh() ?? $conversation));
 
-        if ($blocked) {
+        // $stale: old mail picked up by the first sync or after an outage. It
+        // is shown in the inbox, but nothing acts on it.
+        if ($blocked || $stale) {
             return;
         }
 

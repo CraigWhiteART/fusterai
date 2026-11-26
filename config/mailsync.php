@@ -14,6 +14,16 @@ return [
     // Bodies downloaded per folder per emails:fetch run; the rest wait a minute.
     'max_bodies_per_run' => (int) env('MAIL_SYNC_MAX_BODIES_PER_RUN', 200),
 
+    // Gmail: only mail in the Inbox is work. Customer mail that is already
+    // archived when it is synced is stored as a closed, imported conversation
+    // (no AI draft, notification or auto-reply).
+    'inbox_only' => (bool) env('MAIL_SYNC_INBOX_ONLY', true),
+
+    // Mail older than this when it is ingested (the first-sync lookback, or
+    // catching up after an outage) still becomes a conversation, but gets no
+    // AI draft, automation, notification or auto-reply. 0 = no limit.
+    'live_effects_max_age_hours' => (int) env('MAIL_SYNC_LIVE_EFFECTS_MAX_AGE_HOURS', 24),
+
     // Per-file cap for attachments stored from inbound mail. Larger files are
     // skipped and listed in the thread's meta.skipped_attachments.
     'max_attachment_bytes' => (int) env('MAIL_MAX_ATTACHMENT_BYTES', 20 * 1024 * 1024),

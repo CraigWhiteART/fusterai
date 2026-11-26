@@ -18,6 +18,13 @@ final class MessageClassifier
     private const BOUNCE_SENDER = '/^(?:mailer-daemon|postmaster)@/i';
 
     /**
+     * Shopify's staff order notification, "[Store] Order #1234 placed by
+     * Name". It is sent as the store's own address, so nothing in the headers
+     * marks it as automated. A customer's "Re: ..." does not match.
+     */
+    private const STORE_NOTIFICATION_SUBJECT = '/^\s*\[[^\]]{1,80}\]\s+Order\s+#?\S+\s+placed by\s/iu';
+
+    /**
      * Senders that are machines. Contact forms also send from such addresses,
      * but with the customer in Reply-To; those stay Support.
      */
@@ -40,6 +47,10 @@ final class MessageClassifier
         }
 
         if (preg_match(self::BOUNCE_SENDER, $from)) {
+            return MailClassification::Notification;
+        }
+
+        if (preg_match(self::STORE_NOTIFICATION_SUBJECT, (string) $message->subject)) {
             return MailClassification::Notification;
         }
 
