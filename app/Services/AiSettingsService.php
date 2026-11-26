@@ -44,6 +44,9 @@ class AiSettingsService
         'manager' => 'claude-opus-5-5',
     ];
 
+    /** Roles whose reasoning effort is capped at `low` (see resolveCredentials). */
+    public const LIGHT_ROLES = ['auto_categorization', 'summarization', 'triage', 'history_extraction'];
+
     public const REASONING_EFFORTS = [
         'none',
         'minimal',
@@ -87,6 +90,12 @@ class AiSettingsService
         $key = $this->decrypt($settings['ai_api_key'] ?? null);
 
         $reasoning = $this->normalizeReasoning($settings['ai_reasoning'] ?? []);
+        // Sorting and extraction roles do not get better with deep reasoning,
+        // only slower and dearer: they never run above `low`.
+        if ($task !== null && in_array($task, self::LIGHT_ROLES, true)
+            && array_search($reasoning['effort'], self::REASONING_EFFORTS, true) > array_search('low', self::REASONING_EFFORTS, true)) {
+            $reasoning['effort'] = 'low';
+        }
         $providerOptions = $this->buildProviderOptions($provider, $reasoning);
 
         $lab = $this->labFor($provider);
