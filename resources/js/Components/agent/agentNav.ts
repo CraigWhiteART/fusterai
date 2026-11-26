@@ -1,6 +1,6 @@
 // The AI agent screens, grouped the way the owner works: teach it (Train),
-// check it (Check), run it (Run). Used by the AI Agent menu (AppLayout) and
-// the sub-nav on every /agent page (AgentParts.AgentNav).
+// check it (Check), run it (Run). Rendered as the AI Agent section of the
+// sidebar (lib/appNav.ts).
 
 import {
     BarChart3Icon,
@@ -33,8 +33,6 @@ export interface AgentNavLink {
     /** Active only on this exact path (not on sub-paths). */
     exact?: boolean;
     badge?: AgentNavBadge;
-    /** Visible to non-admins who may approve actions. */
-    approvers?: boolean;
 }
 
 export interface AgentNavGroup {
@@ -69,15 +67,10 @@ export const AGENT_NAV_GROUPS: AgentNavGroup[] = [
         label: 'Run',
         links: [
             { href: '/agent/settings', label: 'Settings', icon: SlidersHorizontalIcon },
-            { href: AGENT_SCREEN_PATHS.actions, label: 'Approvals', icon: ShoppingBagIcon, exact: true, badge: 'actions', approvers: true },
+            { href: AGENT_SCREEN_PATHS.actions, label: 'Approvals', icon: ShoppingBagIcon, exact: true, badge: 'actions' },
             { href: AGENT_SCREEN_PATHS.actionPolicies, label: 'Action rules', icon: ShieldCheckIcon },
             { href: AGENT_SCREEN_PATHS.actionAudit, label: 'Action history', icon: ScrollTextIcon },
             { href: '/agent/connections', label: 'Connections', icon: PlugIcon },
         ],
     },
 ];
-
-export function isAgentLinkActive(link: AgentNavLink, path: string): boolean {
-    const clean = path.split('?')[0].replace(/\/+$/, '') || '/';
-    return link.exact ? clean === link.href : clean === link.href || clean.startsWith(`${link.href}/`);
-}

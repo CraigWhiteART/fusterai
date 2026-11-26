@@ -1,71 +1,23 @@
 import React from 'react';
-import { Head, Link, usePage } from '@inertiajs/react';
+import { Head, Link } from '@inertiajs/react';
 import { GripVerticalIcon, HistoryIcon, PlusIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react';
 import AppLayout from '@/Layouts/AppLayout';
-import { AGENT_NAV_GROUPS, isAgentLinkActive } from '@/Components/agent/agentNav';
 import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
-import { usePendingActionCount } from '@/lib/agentActions';
-import { useOpenProposalCount } from '@/lib/agentLoop';
-import { isAdminRole } from '@/lib/roles';
 import { cn } from '@/lib/utils';
-import type { PageProps } from '@/types';
 import type { ListItem } from '@/types/agent';
 
 // ── Navigation and page chrome ───────────────────────────────────────────────
 
-/** Grouped sub-nav (Train / Check / Run); non-admins only see the approvals queue. */
-export function AgentNav({ current }: { current: string }) {
-    const { auth } = usePage<PageProps>().props;
-    const isAdmin = isAdminRole(auth?.user?.role);
-    const openProposals = useOpenProposalCount(isAdmin);
-    const pendingActions = usePendingActionCount(true);
-    const badges: Record<string, number | null> = { proposals: openProposals, actions: pendingActions };
-    const groups = AGENT_NAV_GROUPS.map((g) => ({ ...g, links: g.links.filter((l) => isAdmin || l.approvers) })).filter(
-        (g) => g.links.length > 0,
-    );
-
-    return (
-        <nav className="flex flex-wrap items-baseline gap-x-5 gap-y-1.5 text-sm" aria-label="AI agent">
-            {groups.map((group) => (
-                <div key={group.label ?? 'top'} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    {group.label && isAdmin && (
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">{group.label}</span>
-                    )}
-                    {group.links.map((link) => {
-                        const active = isAgentLinkActive(link, current);
-                        const badge = link.badge ? badges[link.badge] : null;
-                        return (
-                            <Link
-                                key={link.href}
-                                href={link.href}
-                                aria-current={active ? 'page' : undefined}
-                                className={active ? 'text-primary font-medium' : 'text-muted-foreground hover:text-foreground'}
-                            >
-                                {link.label}
-                                {badge ? (
-                                    <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary tabular-nums">
-                                        {badge}
-                                    </span>
-                                ) : null}
-                            </Link>
-                        );
-                    })}
-                </div>
-            ))}
-        </nav>
-    );
-}
-
 export function PageHeader({
     title,
     description,
-    current,
     actions,
     back,
 }: {
     title: string;
     description?: React.ReactNode;
+    /** The page's path; the sidebar shows where you are, so this is informational. */
     current: string;
     actions?: React.ReactNode;
     back?: { href: string; label: string };
@@ -84,7 +36,6 @@ export function PageHeader({
                 </div>
                 {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
             </div>
-            <AgentNav current={current} />
         </div>
     );
 }

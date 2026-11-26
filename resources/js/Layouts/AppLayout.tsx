@@ -22,44 +22,23 @@ import { isAdminRole } from '@/lib/roles';
 import { applyAppearance, persistAppearance, readStoredAppearance } from '@/lib/appearance';
 import { toast } from 'sonner';
 import {
-    InboxIcon,
-    MailboxIcon,
-    UsersIcon,
-    SettingsIcon,
-    BookOpenIcon,
-    BarChartIcon,
     PanelLeftIcon,
     ZapIcon,
     LogOutIcon,
-    MessageSquareIcon,
-    BotIcon,
     SunIcon,
     MoonIcon,
     MonitorIcon,
     ChevronDownIcon,
     ChevronRightIcon,
     PlusIcon,
-    FolderIcon,
-    TagIcon,
-    MessageSquareTextIcon,
-    BrainIcon,
-    PuzzleIcon,
     UserIcon,
     MenuIcon,
     XIcon,
-    ClockIcon,
-    MailIcon,
-    KeyIcon,
-    ClipboardListIcon,
-    LayoutDashboardIcon,
-    GlobeIcon,
-    ShuffleIcon,
-    ThumbsUpIcon,
-    SparklesIcon,
 } from 'lucide-react';
-import { AGENT_SCREEN_PATHS, useOpenProposalCount } from '@/lib/agentLoop';
+import { useOpenProposalCount } from '@/lib/agentLoop';
 import { usePendingActionCount } from '@/lib/agentActions';
-import { AGENT_NAV_GROUPS, isAgentLinkActive } from '@/Components/agent/agentNav';
+import { type AgentNavBadge } from '@/Components/agent/agentNav';
+import { activeItem, buildNav, isItemActive, isSectionActive, type NavSection } from '@/lib/appNav';
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -80,6 +59,63 @@ interface SidebarTag {
     color: string;
 }
 
+const COLLAPSED_KEY = 'fusterai-sidebar-collapsed';
+
+function readCollapsed(): boolean {
+    try {
+        return window.localStorage.getItem(COLLAPSED_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
+
+function CountBadge({ value, strong }: { value: number | null | undefined; strong?: boolean }) {
+    if (!value) return null;
+    return (
+        <span
+            className={cn(
+                'ml-auto shrink-0 rounded-full px-1.5 text-[10px] font-semibold leading-4 tabular-nums',
+                strong ? 'bg-sidebar-primary text-sidebar-primary-foreground' : 'text-sidebar-foreground/55',
+            )}
+        >
+            {value}
+        </span>
+    );
+}
+
+/** Small collapsible group inside the Inbox section (tags, folders, views). */
+function SubGroup({
+    label,
+    open,
+    onToggle,
+    action,
+    children,
+}: {
+    label: string;
+    open: boolean;
+    onToggle: () => void;
+    action?: React.ReactNode;
+    children: React.ReactNode;
+}) {
+    return (
+        <div>
+            <div className="flex items-center gap-1 pr-1">
+                <button
+                    type="button"
+                    onClick={onToggle}
+                    aria-expanded={open}
+                    className="flex flex-1 items-center gap-1 rounded-md px-2 pt-2.5 pb-1 text-left text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 hover:text-sidebar-foreground/80"
+                >
+                    {open ? <ChevronDownIcon className="h-3 w-3" /> : <ChevronRightIcon className="h-3 w-3" />}
+                    {label}
+                </button>
+                {action}
+            </div>
+            {open && <div className="space-y-0.5">{children}</div>}
+        </div>
+    );
+}
+
 export default function AppLayout({ children, fullHeight, onCreateView }: AppLayoutProps) {
     const {
         auth,
@@ -92,6 +128,7 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
         appearance: appearanceDefaults,
         branding,
         agentStatuses: initialAgentStatuses,
+        activeModules,
     } = usePage<
         PageProps & {
             counts?: Record<string, number>;
@@ -99,13 +136,15 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
             tags?: SidebarTag[];
             folders?: Folder[];
             customViews?: import('@/types').CustomView[];
+            activeModules?: string[];
             [key: string]: unknown;
         }
     >().props;
     const [agentStatuses, setAgentStatuses] = React.useState<Record<number, string>>(initialAgentStatuses ?? {});
-    const [collapsed, setCollapsed] = React.useState(false);
+    const [collapsed, setCollapsed] = React.useState(readCollapsed);
     const [mobileOpen, setMobileOpen] = React.useState(false);
-    const [inboxOpen, setInboxOpen] = React.useState(true);
+    // Sections the user opened/closed by hand; otherwise only the current section is open.
+    const [toggled, setToggled] = React.useState<Record<string, boolean>>({});
     const [tagsOpen, setTagsOpen] = React.useState(false);
     const [foldersOpen, setFoldersOpen] = React.useState(true);
     const [viewsOpen, setViewsOpen] = React.useState(true);
@@ -116,6 +155,23 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
     const fullPath = path + window.location.search;
     const searchParams = new URLSearchParams(window.location.search);
     const activeMailbox = searchParams.get('mailbox') ?? 'all';
+    const isAdmin = isAdminRole(auth.user?.role);
+    // AI Agent badges: proposals waiting for review (admins) and Shopify actions waiting
+    // for approval (anyone whose role may approve some action; 403 → null).
+    const openProposals = useOpenProposalCount(isAdmin);
+    const pendingActions = usePendingActionCount(!!auth.user);
+    const badgeValues: Record<AgentNavBadge, number | null> = { actions: pendingActions, proposals: openProposals };
+
+    const sections = React.useMemo(
+        () => buildNav({ isAdmin, modules: activeModules ?? [], hasPendingActions: !!pendingActions }),
+        [isAdmin, activeModules, pendingActions],
+    );
+    const currentSection = sections.find((s) => isSectionActive(s, path)) ?? null;
+    const currentItem = currentSection ? activeItem(currentSection, path) : null;
+
+    const isCommunicationWorkspace = path.startsWith('/conversations') || path.startsWith('/live-chat');
+    // The mobile drawer is always the full sidebar, even if the desktop one is collapsed to icons.
+    const rail = collapsed && !mobileOpen;
 
     React.useEffect(() => {
         applyAppearance(appearance);
@@ -128,6 +184,14 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
         media.addEventListener('change', listener);
         return () => media.removeEventListener('change', listener);
     }, [appearance]);
+
+    React.useEffect(() => {
+        try {
+            window.localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
+        } catch {
+            // storage unavailable — the toggle still works for this page view
+        }
+    }, [collapsed]);
 
     React.useEffect(() => {
         const message = flash?.success ?? flash?.error ?? null;
@@ -150,25 +214,16 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
         };
     }, [auth.user?.workspace_id]);
 
+    // Close mobile sidebar on navigation
+    React.useEffect(() => {
+        setMobileOpen(false);
+    }, [path]);
+
     function cycleTheme() {
         setAppearance((current) => ({
             ...current,
             mode: current.mode === 'light' ? 'dark' : current.mode === 'dark' ? 'system' : 'light',
         }));
-    }
-
-    function navClass(href: string) {
-        return cn(
-            'group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-all duration-150 cursor-pointer',
-            path.startsWith(href)
-                ? 'bg-sidebar-primary text-sidebar-primary-foreground shadow-sm'
-                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
-            sidebarCollapsed && 'justify-center px-2',
-        );
-    }
-
-    function sectionHeaderClass() {
-        return 'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11px] font-semibold text-sidebar-foreground/55 uppercase tracking-[0.12em] transition-colors hover:bg-sidebar-accent/45 hover:text-sidebar-foreground/80';
     }
 
     function switchMailbox(value: string) {
@@ -189,73 +244,269 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
         );
     }
 
+    function sectionBadge(section: NavSection): number {
+        return (section.badges ?? []).reduce((sum, b) => sum + (badgeValues[b] ?? 0), 0);
+    }
+
+    function isOpen(section: NavSection): boolean {
+        if (section.key in toggled) return toggled[section.key];
+        return section === currentSection;
+    }
+
     const inboxFilters = [
+        { label: 'All Conversations', href: '/conversations', count: undefined },
         { label: 'All Open', href: '/conversations?status=open', count: counts?.open },
         { label: 'Mine', href: '/conversations?assigned=me&status=open', count: counts?.mine },
-        { label: 'Unassigned', href: '/conversations?assigned=none&status=open' },
+        { label: 'Unassigned', href: '/conversations?assigned=none&status=open', count: undefined },
         { label: 'Starred', href: '/conversations?starred=1', count: counts?.starred },
         { label: 'Pending', href: '/conversations?status=pending', count: counts?.pending },
         { label: 'Snoozed', href: '/conversations?status=snoozed', count: counts?.snoozed },
-        { label: 'Closed', href: '/conversations?status=closed' },
+        { label: 'Closed', href: '/conversations?status=closed', count: undefined },
     ];
 
-    const isCommunicationWorkspace = path.startsWith('/conversations') || path.startsWith('/live-chat');
-    const sidebarCollapsed = collapsed;
-    const inboxNavActive = ['/mailboxes', '/tags', '/settings/folders', '/settings/canned-responses'].some((h) => path.startsWith(h));
-    const customersNavActive = path.startsWith('/customers');
-    const analyticsNavActive = path.startsWith('/reports');
-    const aiNavActive = ['/automation', '/ai/', '/settings/ai'].some((h) => path.startsWith(h));
-    const customNavActive = ['/settings/appearance', '/settings/live-chat'].some((h) => path.startsWith(h));
-    const portalNavActive = path.startsWith('/settings/portal');
-    const agentNavActive = path === '/agent' || path.startsWith('/agent/');
-    const isAdmin = isAdminRole(auth.user?.role);
-    // AI Agent menu badges: proposals waiting for review (admins) and Shopify actions waiting
-    // for approval (anyone whose role may approve some action; 403 → null).
-    const openProposals = useOpenProposalCount(isAdmin);
-    const pendingActions = usePendingActionCount(!!auth.user);
-    const settingsNavActive =
-        [
-            '/settings/general',
-            '/settings/users',
-            '/settings/modules',
-            '/settings/email',
-            '/settings/api-keys',
-            '/settings/audit-log',
-            '/settings/portal',
-            '/settings/routing',
-            '/settings/sla',
-            '/settings/survey',
-            '/settings',
-        ].some((h) => path.startsWith(h)) &&
-        !customNavActive &&
-        !aiNavActive;
+    const childClass = (active: boolean) =>
+        cn(
+            'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
+            active
+                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold'
+                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/45 hover:text-sidebar-foreground',
+        );
 
-    React.useEffect(() => {
-        if (!isCommunicationWorkspace) return;
-        setInboxOpen(true);
-    }, [isCommunicationWorkspace, path]);
+    const manageLink = (href: string, title: string) => (
+        <Link
+            href={href}
+            title={title}
+            className="rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+        >
+            <PlusIcon className="h-3 w-3" />
+        </Link>
+    );
 
-    // Close mobile sidebar on navigation
-    React.useEffect(() => {
-        setMobileOpen(false);
-    }, [path]);
+    function renderInboxChildren() {
+        return (
+            <>
+                {inboxFilters.map(({ label, href, count }) => (
+                    <Link key={href} href={href} className={childClass(fullPath === href)}>
+                        <span className="flex-1 truncate">{label}</span>
+                        <CountBadge value={count} />
+                    </Link>
+                ))}
+
+                {isCommunicationWorkspace && (
+                    <>
+                        <SubGroup
+                            label="Tags"
+                            open={tagsOpen}
+                            onToggle={() => setTagsOpen((v) => !v)}
+                            action={manageLink('/tags', 'Manage tags')}
+                        >
+                            {tags && tags.length > 0 ? (
+                                tags.map((tag) => {
+                                    const href = `/conversations?tag=${tag.id}&status=open`;
+                                    return (
+                                        <Link key={tag.id} href={href} className={childClass(fullPath === href)}>
+                                            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} />
+                                            <span className="truncate">{tag.name}</span>
+                                        </Link>
+                                    );
+                                })
+                            ) : (
+                                <Link
+                                    href="/tags"
+                                    className="block px-2.5 py-1 text-xs italic text-sidebar-foreground/50 hover:text-sidebar-foreground/75"
+                                >
+                                    + Create your first tag
+                                </Link>
+                            )}
+                        </SubGroup>
+
+                        <SubGroup
+                            label="My Folders"
+                            open={foldersOpen}
+                            onToggle={() => setFoldersOpen((v) => !v)}
+                            action={manageLink('/settings/folders', 'Manage folders')}
+                        >
+                            {folders && folders.length > 0 ? (
+                                folders.map((folder) => {
+                                    const href = `/conversations?folder=${folder.id}`;
+                                    return (
+                                        <Link key={folder.id} href={href} className={childClass(fullPath === href)}>
+                                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: folder.color }} />
+                                            <span className="flex-1 truncate">{folder.name}</span>
+                                            <CountBadge value={folder.open_count} />
+                                        </Link>
+                                    );
+                                })
+                            ) : (
+                                <Link
+                                    href="/settings/folders"
+                                    className="block px-2.5 py-1 text-xs italic text-sidebar-foreground/50 hover:text-sidebar-foreground/75"
+                                >
+                                    + Create your first folder
+                                </Link>
+                            )}
+                        </SubGroup>
+
+                        <SubGroup
+                            label="My Views"
+                            open={viewsOpen}
+                            onToggle={() => setViewsOpen((v) => !v)}
+                            action={
+                                onCreateView ? (
+                                    <button
+                                        type="button"
+                                        onClick={onCreateView}
+                                        title="New view"
+                                        className="rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                                    >
+                                        <PlusIcon className="h-3 w-3" />
+                                    </button>
+                                ) : undefined
+                            }
+                        >
+                            {customViews && customViews.length > 0 ? (
+                                customViews.map((view) => {
+                                    const href = `/conversations?view=${view.id}`;
+                                    return (
+                                        <Link key={view.id} href={href} className={childClass(fullPath === href)}>
+                                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: view.color }} />
+                                            <span className="flex-1 truncate">{view.name}</span>
+                                            {view.is_shared && (
+                                                <span className="shrink-0 text-[9px] uppercase tracking-wide text-sidebar-foreground/40">
+                                                    shared
+                                                </span>
+                                            )}
+                                        </Link>
+                                    );
+                                })
+                            ) : onCreateView ? (
+                                <button
+                                    type="button"
+                                    onClick={onCreateView}
+                                    className="block w-full px-2.5 py-1 text-left text-xs italic text-sidebar-foreground/50 hover:text-sidebar-foreground/75"
+                                >
+                                    + Create your first view
+                                </button>
+                            ) : null}
+                        </SubGroup>
+                    </>
+                )}
+            </>
+        );
+    }
+
+    function renderSection(section: NavSection) {
+        const Icon = section.icon;
+        const sectionActive = section === currentSection;
+        const expandable = !!section.groups || section.key === 'inbox';
+        const open = expandable && isOpen(section);
+        // A section that has sub-pages highlights the sub-page, not itself.
+        const highlightRow = sectionActive && (!expandable || (!currentItem && section.key !== 'inbox'));
+        const badge = sectionBadge(section);
+
+        if (rail) {
+            return (
+                <Link
+                    key={section.key}
+                    href={section.href}
+                    title={section.label}
+                    aria-current={sectionActive ? 'page' : undefined}
+                    className={cn(
+                        'relative flex h-10 items-center justify-center rounded-lg transition-colors',
+                        sectionActive
+                            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                            : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
+                    )}
+                >
+                    <Icon className="size-4.5" />
+                    {badge > 0 && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-sidebar-primary" />}
+                </Link>
+            );
+        }
+
+        return (
+            <div key={section.key}>
+                <div
+                    className={cn(
+                        'group flex items-center rounded-lg transition-colors',
+                        highlightRow
+                            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                            : sectionActive
+                              ? 'text-sidebar-foreground'
+                              : 'text-sidebar-foreground/75 hover:bg-sidebar-accent/45 hover:text-sidebar-foreground',
+                    )}
+                >
+                    <Link
+                        href={section.href}
+                        aria-current={highlightRow ? 'page' : undefined}
+                        className={cn(
+                            'flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 text-[13.5px]',
+                            sectionActive ? 'font-semibold' : 'font-medium',
+                            !expandable && 'pr-3',
+                        )}
+                    >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="truncate">{section.label}</span>
+                        {section.key === 'inbox' ? <CountBadge value={counts?.open} /> : <CountBadge value={badge} strong />}
+                    </Link>
+                    {expandable && (
+                        <button
+                            type="button"
+                            onClick={() => setToggled((t) => ({ ...t, [section.key]: !open }))}
+                            aria-expanded={open}
+                            aria-label={`${open ? 'Collapse' : 'Expand'} ${section.label}`}
+                            className="mr-1 rounded-md p-1.5 opacity-60 hover:bg-sidebar-accent/60 hover:opacity-100"
+                        >
+                            <ChevronDownIcon className={cn('h-3.5 w-3.5 transition-transform', !open && '-rotate-90')} />
+                        </button>
+                    )}
+                </div>
+
+                {open && (
+                    <div className="mb-1.5 ml-[1.15rem] mt-0.5 space-y-0.5 border-l border-sidebar-foreground/10 pl-2">
+                        {section.key === 'inbox'
+                            ? renderInboxChildren()
+                            : section.groups?.map((group) => (
+                                  <div key={group.label ?? 'top'} className="space-y-0.5">
+                                      {group.label && (
+                                          <p className="px-2.5 pb-0.5 pt-2.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/45">
+                                              {group.label}
+                                          </p>
+                                      )}
+                                      {group.items.map((item) => {
+                                          const active = isItemActive(item, path);
+                                          return (
+                                              <Link
+                                                  key={item.href}
+                                                  href={item.href}
+                                                  aria-current={active ? 'page' : undefined}
+                                                  className={childClass(active)}
+                                              >
+                                                  <span className="flex-1 truncate">{item.label}</span>
+                                                  <CountBadge value={item.badge ? badgeValues[item.badge] : null} strong />
+                                              </Link>
+                                          );
+                                      })}
+                                  </div>
+                              ))}
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div className="flex h-full bg-muted/40 md:p-3 gap-0">
             {/* Mobile sidebar backdrop */}
             {mobileOpen && <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileOpen(false)} />}
 
-            <div
-                className={cn(
-                    'flex min-w-0 flex-1 rounded-none md:rounded-xl shadow-[0_2px_24px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_24px_rgba(0,0,0,0.28)] overflow-hidden',
-                )}
-            >
+            <div className="flex min-w-0 flex-1 rounded-none md:rounded-xl shadow-[0_2px_24px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_24px_rgba(0,0,0,0.28)] overflow-hidden">
                 <aside
                     className={cn(
                         'relative flex flex-col bg-sidebar text-sidebar-foreground transition-all duration-200 shrink-0 backdrop-blur-md',
                         // Desktop: collapsible width
                         'hidden md:flex',
-                        sidebarCollapsed ? 'md:w-16' : 'md:w-64',
+                        rail ? 'md:w-16' : 'md:w-64',
                         // Mobile: fixed overlay
                         mobileOpen && 'flex fixed inset-y-0 left-0 z-50 w-72 md:relative md:inset-auto md:z-auto',
                     )}
@@ -264,7 +515,7 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                     <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/20 dark:bg-black/20" />
                     {/* Logo + toggle */}
                     <div className="relative z-10 flex h-16 items-center justify-between px-3.5 border-b border-border/60 shrink-0">
-                        {(!sidebarCollapsed || mobileOpen) && (
+                        {!rail && (
                             <Link href="/dashboard" className="flex items-center gap-2.5 min-w-0">
                                 {branding?.logo_url ? (
                                     <img
@@ -284,13 +535,19 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                         )}
                         {/* Desktop collapse toggle */}
                         <button
+                            type="button"
                             onClick={() => setCollapsed(!collapsed)}
-                            className="ml-auto hidden md:flex rounded-lg p-2 hover:bg-sidebar-accent/80 transition-colors"
+                            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                            className={cn(
+                                'hidden md:flex rounded-lg p-2 hover:bg-sidebar-accent/80 transition-colors',
+                                rail ? 'mx-auto' : 'ml-auto',
+                            )}
                         >
                             <PanelLeftIcon className="h-4 w-4" />
                         </button>
                         {/* Mobile close button */}
                         <button
+                            type="button"
                             onClick={() => setMobileOpen(false)}
                             className="ml-auto flex md:hidden rounded-lg p-2 hover:bg-sidebar-accent/80 transition-colors"
                         >
@@ -299,7 +556,7 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                     </div>
 
                     {/* Mailbox switcher */}
-                    {!sidebarCollapsed && isCommunicationWorkspace && (mailboxes?.length ?? 0) > 0 && (
+                    {!rail && isCommunicationWorkspace && (mailboxes?.length ?? 0) > 0 && (
                         <div className="relative z-10 px-3 py-2.5 border-b border-sidebar-border/70">
                             <Select value={activeMailbox} onValueChange={switchMailbox}>
                                 <SelectTrigger className="w-full bg-transparent border-transparent hover:bg-sidebar-accent/40 text-sm font-medium shadow-none">
@@ -318,276 +575,14 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                     )}
 
                     {/* Search */}
-                    {!sidebarCollapsed && isCommunicationWorkspace && (
+                    {!rail && isCommunicationWorkspace && (
                         <div className="relative z-10 px-3 py-2.5 border-b border-sidebar-border/70">
                             <GlobalSearch />
                         </div>
                     )}
 
-                    {/* Nav */}
-                    <nav className="relative z-10 flex-1 overflow-y-auto py-3 px-2.5 space-y-1">
-                        {sidebarCollapsed ? (
-                            <>
-                                <Link href="/dashboard" className={navClass('/dashboard')} title="Dashboard">
-                                    <LayoutDashboardIcon className="h-4 w-4 shrink-0" />
-                                </Link>
-                                <Link href="/conversations" className={navClass('/conversations')} title="Inbox">
-                                    <InboxIcon className="h-4 w-4 shrink-0" />
-                                </Link>
-                                <Link href="/tags" className={navClass('/tags')} title="Tags">
-                                    <TagIcon className="h-4 w-4 shrink-0" />
-                                </Link>
-                                <Link href="/settings/folders" className={navClass('/settings/folders')} title="Folders">
-                                    <FolderIcon className="h-4 w-4 shrink-0" />
-                                </Link>
-                                <Link href="/live-chat" className={navClass('/live-chat')} title="Live Chat">
-                                    <MessageSquareIcon className="h-4 w-4 shrink-0" />
-                                </Link>
-                            </>
-                        ) : isCommunicationWorkspace ? (
-                            <>
-                                <div className="space-y-1">
-                                    <button type="button" onClick={() => setInboxOpen((v) => !v)} className={sectionHeaderClass()}>
-                                        {inboxOpen ? (
-                                            <ChevronDownIcon className="h-3.5 w-3.5" />
-                                        ) : (
-                                            <ChevronRightIcon className="h-3.5 w-3.5" />
-                                        )}
-                                        <span className="flex-1">Inbox</span>
-                                        {(counts?.open ?? 0) > 0 && (
-                                            <span className="text-[10px] text-sidebar-foreground/65">{counts?.open}</span>
-                                        )}
-                                    </button>
-                                    {inboxOpen && (
-                                        <div className="ml-4 space-y-0.5 pr-1">
-                                            <Link
-                                                href="/conversations"
-                                                className={cn(
-                                                    'flex items-center gap-2 rounded-lg px-2.5 py-1 text-[13px] transition-colors',
-                                                    fullPath === '/conversations'
-                                                        ? 'text-sidebar-primary font-semibold'
-                                                        : 'text-sidebar-foreground/65 hover:text-sidebar-foreground hover:bg-sidebar-accent/50',
-                                                )}
-                                            >
-                                                <span className="flex-1">All Conversations</span>
-                                            </Link>
-                                            {inboxFilters.map(({ label, href, count }) => (
-                                                <Link
-                                                    key={href}
-                                                    href={href}
-                                                    className={cn(
-                                                        'flex items-center gap-2 rounded-lg px-2.5 py-1 text-[13px] transition-colors',
-                                                        fullPath === href
-                                                            ? 'text-sidebar-primary font-semibold'
-                                                            : 'text-sidebar-foreground/65 hover:text-sidebar-foreground hover:bg-sidebar-accent/50',
-                                                    )}
-                                                >
-                                                    <span className="flex-1">{label}</span>
-                                                    {count !== undefined && count > 0 && (
-                                                        <span className="text-xs text-sidebar-foreground/45">{count}</span>
-                                                    )}
-                                                </Link>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="mt-1 space-y-1">
-                                    <button type="button" onClick={() => setTagsOpen((v) => !v)} className={sectionHeaderClass()}>
-                                        {tagsOpen ? (
-                                            <ChevronDownIcon className="h-3.5 w-3.5" />
-                                        ) : (
-                                            <ChevronRightIcon className="h-3.5 w-3.5" />
-                                        )}
-                                        <span className="flex-1">Tags</span>
-                                        <Link
-                                            href="/tags"
-                                            onClick={(e) => e.stopPropagation()}
-                                            className="rounded p-0.5 hover:bg-sidebar-accent/60 transition-colors"
-                                            title="Manage tags"
-                                        >
-                                            <PlusIcon className="h-3 w-3" />
-                                        </Link>
-                                    </button>
-                                    {tagsOpen && (
-                                        <div className="ml-4 space-y-0.5 pr-1">
-                                            {tags && tags.length > 0 ? (
-                                                tags.map((tag) => (
-                                                    <Link
-                                                        key={tag.id}
-                                                        href={`/conversations?tag=${tag.id}&status=open`}
-                                                        className={cn(
-                                                            'flex items-center gap-2 rounded-lg px-2.5 py-1 text-[13px] transition-colors',
-                                                            fullPath === `/conversations?tag=${tag.id}&status=open`
-                                                                ? 'text-sidebar-primary font-semibold'
-                                                                : 'text-sidebar-foreground/65 hover:text-sidebar-foreground hover:bg-sidebar-accent/50',
-                                                        )}
-                                                    >
-                                                        <span
-                                                            className="h-2.5 w-2.5 rounded-full shrink-0"
-                                                            style={{ backgroundColor: tag.color }}
-                                                        />
-                                                        <span className="truncate">{tag.name}</span>
-                                                    </Link>
-                                                ))
-                                            ) : (
-                                                <Link
-                                                    href="/tags"
-                                                    className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-sidebar-foreground/45 hover:text-sidebar-foreground/65 transition-colors italic"
-                                                >
-                                                    + Create your first tag
-                                                </Link>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="mt-1 space-y-1">
-                                    <button type="button" onClick={() => setFoldersOpen((v) => !v)} className={sectionHeaderClass()}>
-                                        {foldersOpen ? (
-                                            <ChevronDownIcon className="h-3.5 w-3.5" />
-                                        ) : (
-                                            <ChevronRightIcon className="h-3.5 w-3.5" />
-                                        )}
-                                        <span className="flex-1">My Folders</span>
-                                        <Link
-                                            href="/settings/folders"
-                                            onClick={(e) => e.stopPropagation()}
-                                            className="rounded p-0.5 hover:bg-sidebar-accent/60 transition-colors"
-                                            title="Manage folders"
-                                        >
-                                            <PlusIcon className="h-3 w-3" />
-                                        </Link>
-                                    </button>
-                                    {foldersOpen && (
-                                        <div className="ml-4 space-y-0.5 pr-1">
-                                            {folders && folders.length > 0 ? (
-                                                folders.map((folder) => {
-                                                    const href = `/conversations?folder=${folder.id}`;
-                                                    return (
-                                                        <Link
-                                                            key={folder.id}
-                                                            href={href}
-                                                            className={cn(
-                                                                'flex items-center gap-2 rounded-lg px-2.5 py-1 text-[13px] transition-colors',
-                                                                fullPath === href
-                                                                    ? 'text-sidebar-primary font-semibold'
-                                                                    : 'text-sidebar-foreground/65 hover:text-sidebar-foreground hover:bg-sidebar-accent/50',
-                                                            )}
-                                                        >
-                                                            <span
-                                                                className="h-2 w-2 rounded-full shrink-0"
-                                                                style={{ backgroundColor: folder.color }}
-                                                            />
-                                                            <span className="flex-1 truncate">{folder.name}</span>
-                                                            {(folder.open_count ?? 0) > 0 && (
-                                                                <span className="text-xs text-sidebar-foreground/45">
-                                                                    {folder.open_count}
-                                                                </span>
-                                                            )}
-                                                        </Link>
-                                                    );
-                                                })
-                                            ) : (
-                                                <Link
-                                                    href="/settings/folders"
-                                                    className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-sidebar-foreground/45 hover:text-sidebar-foreground/65 transition-colors italic"
-                                                >
-                                                    + Create your first folder
-                                                </Link>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* My Views */}
-                                <div className="mt-1 space-y-1">
-                                    <button type="button" onClick={() => setViewsOpen((v) => !v)} className={sectionHeaderClass()}>
-                                        {viewsOpen ? (
-                                            <ChevronDownIcon className="h-3.5 w-3.5" />
-                                        ) : (
-                                            <ChevronRightIcon className="h-3.5 w-3.5" />
-                                        )}
-                                        <span className="flex-1">My Views</span>
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onCreateView?.();
-                                            }}
-                                            className="rounded p-0.5 hover:bg-sidebar-accent/60 transition-colors"
-                                            title="New view"
-                                        >
-                                            <PlusIcon className="h-3 w-3" />
-                                        </button>
-                                    </button>
-                                    {viewsOpen && (
-                                        <div className="ml-4 space-y-0.5 pr-1">
-                                            {customViews && customViews.length > 0 ? (
-                                                customViews.map((view) => {
-                                                    const href = `/conversations?view=${view.id}`;
-                                                    return (
-                                                        <Link
-                                                            key={view.id}
-                                                            href={href}
-                                                            className={cn(
-                                                                'flex items-center gap-2 rounded-lg px-2.5 py-1 text-[13px] transition-colors',
-                                                                fullPath === href
-                                                                    ? 'text-sidebar-primary font-semibold'
-                                                                    : 'text-sidebar-foreground/65 hover:text-sidebar-foreground hover:bg-sidebar-accent/50',
-                                                            )}
-                                                        >
-                                                            <span
-                                                                className="h-2 w-2 rounded-full shrink-0"
-                                                                style={{ backgroundColor: view.color }}
-                                                            />
-                                                            <span className="flex-1 truncate">{view.name}</span>
-                                                            {view.is_shared && (
-                                                                <span className="text-[9px] text-sidebar-foreground/35 uppercase tracking-wide shrink-0">
-                                                                    shared
-                                                                </span>
-                                                            )}
-                                                        </Link>
-                                                    );
-                                                })
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => onCreateView?.()}
-                                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-sidebar-foreground/45 hover:text-sidebar-foreground/65 transition-colors italic"
-                                                >
-                                                    + Create your first view
-                                                </button>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="my-1.5 h-px bg-sidebar-muted/75" />
-                                <Link href="/live-chat" className={navClass('/live-chat')}>
-                                    <MessageSquareIcon className="h-4 w-4 shrink-0" />
-                                    <span>Live Chat</span>
-                                </Link>
-                            </>
-                        ) : (
-                            <div className="space-y-1">
-                                <Link href="/dashboard" className={navClass('/dashboard')}>
-                                    <LayoutDashboardIcon className="h-4 w-4 shrink-0" />
-                                    <span>Dashboard</span>
-                                </Link>
-                                <p className="px-2.5 pt-3 pb-1 text-[11px] font-semibold text-sidebar-foreground/50 uppercase tracking-[0.12em]">
-                                    Communication
-                                </p>
-                                <Link href="/conversations" className={navClass('/conversations')}>
-                                    <InboxIcon className="h-4 w-4 shrink-0" />
-                                    <span>Inbox</span>
-                                </Link>
-                                <Link href="/live-chat" className={navClass('/live-chat')}>
-                                    <MessageSquareIcon className="h-4 w-4 shrink-0" />
-                                    <span>Live Chat</span>
-                                </Link>
-                            </div>
-                        )}
+                    <nav aria-label="Main" className="relative z-10 flex-1 overflow-y-auto py-3 px-2.5 space-y-0.5">
+                        {sections.map(renderSection)}
                     </nav>
 
                     {/* Module slot: inject extra sidebar content below nav */}
@@ -602,431 +597,31 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                             <button
                                 type="button"
                                 onClick={() => setMobileOpen(true)}
+                                aria-label="Open menu"
                                 className="flex md:hidden items-center justify-center h-9 w-9 rounded-lg hover:bg-muted/70 transition-colors"
                             >
                                 <MenuIcon className="h-5 w-5" />
                             </button>
 
-                            <nav className="hidden items-center gap-0.5 lg:flex">
-                                {/* Inbox ▾ */}
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button
-                                            className={cn(
-                                                'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
-                                                inboxNavActive
-                                                    ? 'text-primary font-semibold'
-                                                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                            )}
-                                        >
-                                            <MailboxIcon className="h-3.5 w-3.5" />
-                                            <span>Inbox</span>
-                                            <ChevronDownIcon className="h-3 w-3 opacity-50" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="start" className="w-52 border-0 bg-popover/95 shadow-xl backdrop-blur">
-                                        <DropdownMenuGroup>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/mailboxes"
-                                                    className={cn('w-full', path.startsWith('/mailboxes') && 'text-primary')}
-                                                >
-                                                    <MailboxIcon className="h-4 w-4" />
-                                                    <span>Mailboxes</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link href="/tags" className={cn('w-full', path.startsWith('/tags') && 'text-primary')}>
-                                                    <TagIcon className="h-4 w-4" />
-                                                    <span>Tags</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/folders"
-                                                    className={cn('w-full', path.startsWith('/settings/folders') && 'text-primary')}
-                                                >
-                                                    <FolderIcon className="h-4 w-4" />
-                                                    <span>Folders</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/canned-responses"
-                                                    className={cn(
-                                                        'w-full',
-                                                        path.startsWith('/settings/canned-responses') && 'text-primary',
-                                                    )}
-                                                >
-                                                    <MessageSquareTextIcon className="h-4 w-4" />
-                                                    <span>Canned Responses</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                        </DropdownMenuGroup>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-
-                                {/* Customers */}
-                                <Link
-                                    href="/customers"
-                                    className={cn(
-                                        'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
-                                        customersNavActive
-                                            ? 'text-primary font-semibold'
-                                            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                    )}
-                                >
-                                    <UsersIcon className="h-3.5 w-3.5" />
-                                    <span>Customers</span>
-                                </Link>
-
-                                {/* Analytics */}
-                                <Link
-                                    href="/reports"
-                                    className={cn(
-                                        'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
-                                        analyticsNavActive
-                                            ? 'text-primary font-semibold'
-                                            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                    )}
-                                >
-                                    <BarChartIcon className="h-3.5 w-3.5" />
-                                    <span>Analytics</span>
-                                </Link>
-
-                                {/* AI ▾ */}
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button
-                                            className={cn(
-                                                'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
-                                                aiNavActive
-                                                    ? 'text-primary font-semibold'
-                                                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                            )}
-                                        >
-                                            <BrainIcon className="h-3.5 w-3.5" />
-                                            <span>AI</span>
-                                            <ChevronDownIcon className="h-3 w-3 opacity-50" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="start" className="w-52 border-0 bg-popover/95 shadow-xl backdrop-blur">
-                                        <DropdownMenuGroup>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/ai"
-                                                    className={cn('w-full', path.startsWith('/settings/ai') && 'text-primary')}
-                                                >
-                                                    <BrainIcon className="h-4 w-4" />
-                                                    <span>AI Config</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/ai/knowledge-base"
-                                                    className={cn('w-full', path.startsWith('/ai/') && 'text-primary')}
-                                                >
-                                                    <BookOpenIcon className="h-4 w-4" />
-                                                    <span>Knowledge Base</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/automation"
-                                                    className={cn('w-full', path.startsWith('/automation') && 'text-primary')}
-                                                >
-                                                    <BotIcon className="h-4 w-4" />
-                                                    <span>Automation</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                        </DropdownMenuGroup>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-
-                                {/* AI Agent ▾ (admins: every /agent screen needs manage-settings) */}
-                                {isAdmin && (
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <button
-                                                className={cn(
-                                                    'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
-                                                    agentNavActive
-                                                        ? 'text-primary font-semibold'
-                                                        : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                                )}
+                            {/* Where am I: section › page */}
+                            {currentSection && (
+                                <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
+                                    {currentItem ? (
+                                        <>
+                                            <Link
+                                                href={currentSection.href}
+                                                className="truncate text-muted-foreground hover:text-foreground"
                                             >
-                                                <SparklesIcon className="h-3.5 w-3.5" />
-                                                <span>AI Agent</span>
-                                                {pendingActions || openProposals ? (
-                                                    <span
-                                                        className="rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground tabular-nums"
-                                                        title={[
-                                                            pendingActions
-                                                                ? `${pendingActions} Shopify action${pendingActions === 1 ? '' : 's'} waiting for approval`
-                                                                : null,
-                                                            openProposals
-                                                                ? `${openProposals} proposal${openProposals === 1 ? '' : 's'} waiting for review`
-                                                                : null,
-                                                        ]
-                                                            .filter(Boolean)
-                                                            .join(', ')}
-                                                    >
-                                                        {(pendingActions ?? 0) + (openProposals ?? 0)}
-                                                    </span>
-                                                ) : null}
-                                                <ChevronDownIcon className="h-3 w-3 opacity-50" />
-                                            </button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent
-                                            align="start"
-                                            className="max-h-[80vh] w-56 overflow-y-auto border-0 bg-popover/95 shadow-xl backdrop-blur"
-                                        >
-                                            {AGENT_NAV_GROUPS.map((group, gi) => (
-                                                <DropdownMenuGroup key={group.label ?? 'top'}>
-                                                    {gi > 0 && <DropdownMenuSeparator />}
-                                                    {group.label && (
-                                                        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
-                                                            {group.label}
-                                                        </DropdownMenuLabel>
-                                                    )}
-                                                    {group.links.map((link) => {
-                                                        const Icon = link.icon;
-                                                        const badge =
-                                                            link.badge === 'actions'
-                                                                ? pendingActions
-                                                                : link.badge === 'proposals'
-                                                                  ? openProposals
-                                                                  : null;
-                                                        return (
-                                                            <DropdownMenuItem key={link.href} asChild>
-                                                                <Link
-                                                                    href={link.href}
-                                                                    className={cn(
-                                                                        'w-full',
-                                                                        isAgentLinkActive(link, path) && 'text-primary',
-                                                                    )}
-                                                                >
-                                                                    <Icon className="h-4 w-4" />
-                                                                    <span>{link.label}</span>
-                                                                    {badge ? (
-                                                                        <span className="ml-auto rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary tabular-nums">
-                                                                            {badge}
-                                                                        </span>
-                                                                    ) : null}
-                                                                </Link>
-                                                            </DropdownMenuItem>
-                                                        );
-                                                    })}
-                                                </DropdownMenuGroup>
-                                            ))}
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                )}
-
-                                {/* Non-admin approvers: a direct link when Shopify actions wait for them. */}
-                                {!isAdmin && pendingActions ? (
-                                    <Link
-                                        href={AGENT_SCREEN_PATHS.actions}
-                                        className={cn(
-                                            'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
-                                            path.startsWith(AGENT_SCREEN_PATHS.actions)
-                                                ? 'text-primary font-semibold'
-                                                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                        )}
-                                    >
-                                        <SparklesIcon className="h-3.5 w-3.5" />
-                                        <span>Approvals</span>
-                                        <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground tabular-nums">
-                                            {pendingActions}
-                                        </span>
-                                    </Link>
-                                ) : null}
-
-                                {/* Customization ▾ */}
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button
-                                            className={cn(
-                                                'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
-                                                customNavActive
-                                                    ? 'text-primary font-semibold'
-                                                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                            )}
-                                        >
-                                            <MonitorIcon className="h-3.5 w-3.5" />
-                                            <span>Customization</span>
-                                            <ChevronDownIcon className="h-3 w-3 opacity-50" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="start" className="w-52 border-0 bg-popover/95 shadow-xl backdrop-blur">
-                                        <DropdownMenuGroup>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/appearance"
-                                                    className={cn('w-full', path.startsWith('/settings/appearance') && 'text-primary')}
-                                                >
-                                                    <MonitorIcon className="h-4 w-4" />
-                                                    <span>Appearance</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/live-chat"
-                                                    className={cn('w-full', path.startsWith('/settings/live-chat') && 'text-primary')}
-                                                >
-                                                    <MessageSquareIcon className="h-4 w-4" />
-                                                    <span>Live Chat Widget</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                        </DropdownMenuGroup>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-
-                                {/* Settings ▾ */}
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button
-                                            className={cn(
-                                                'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
-                                                settingsNavActive
-                                                    ? 'text-primary font-semibold'
-                                                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                            )}
-                                        >
-                                            <SettingsIcon className="h-3.5 w-3.5" />
-                                            <span>Settings</span>
-                                            <ChevronDownIcon className="h-3 w-3 opacity-50" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="start" className="w-52 border-0 bg-popover/95 shadow-xl backdrop-blur">
-                                        <DropdownMenuGroup>
-                                            <DropdownMenuItem asChild>
-                                                <Link href="/settings" className={cn('w-full', path === '/settings' && 'text-primary')}>
-                                                    <SettingsIcon className="h-4 w-4" />
-                                                    <span>General</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/users"
-                                                    className={cn('w-full', path.startsWith('/settings/users') && 'text-primary')}
-                                                >
-                                                    <UsersIcon className="h-4 w-4" />
-                                                    <span>Team</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/modules"
-                                                    className={cn('w-full', path.startsWith('/settings/modules') && 'text-primary')}
-                                                >
-                                                    <PuzzleIcon className="h-4 w-4" />
-                                                    <span>Modules</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/email"
-                                                    className={cn('w-full', path.startsWith('/settings/email') && 'text-primary')}
-                                                >
-                                                    <MailIcon className="h-4 w-4" />
-                                                    <span>Email</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/api-keys"
-                                                    className={cn('w-full', path.startsWith('/settings/api-keys') && 'text-primary')}
-                                                >
-                                                    <KeyIcon className="h-4 w-4" />
-                                                    <span>API Keys</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link
-                                                    href="/settings/audit-log"
-                                                    className={cn('w-full', path.startsWith('/settings/audit-log') && 'text-primary')}
-                                                >
-                                                    <ClipboardListIcon className="h-4 w-4" />
-                                                    <span>Audit Log</span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                            {(usePage<PageProps>().props as any).activeModules?.includes('SlaManager') && (
-                                                <>
-                                                    <DropdownMenuItem asChild>
-                                                        <Link
-                                                            href="/settings/sla"
-                                                            className={cn('w-full', path === '/settings/sla' && 'text-primary')}
-                                                        >
-                                                            <ClockIcon className="h-4 w-4" />
-                                                            <span>SLA Policies</span>
-                                                        </Link>
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem asChild>
-                                                        <Link
-                                                            href="/settings/sla/report"
-                                                            className={cn(
-                                                                'w-full',
-                                                                path.startsWith('/settings/sla/report') && 'text-primary',
-                                                            )}
-                                                        >
-                                                            <BarChartIcon className="h-4 w-4" />
-                                                            <span>SLA Report</span>
-                                                        </Link>
-                                                    </DropdownMenuItem>
-                                                </>
-                                            )}
-                                            {(usePage<PageProps>().props as any).activeModules?.includes('ConversationRouting') && (
-                                                <DropdownMenuItem asChild>
-                                                    <Link
-                                                        href="/settings/routing"
-                                                        className={cn('w-full', path.startsWith('/settings/routing') && 'text-primary')}
-                                                    >
-                                                        <ShuffleIcon className="h-4 w-4" />
-                                                        <span>Routing</span>
-                                                    </Link>
-                                                </DropdownMenuItem>
-                                            )}
-                                            {(usePage<PageProps>().props as any).activeModules?.includes('SatisfactionSurvey') && (
-                                                <>
-                                                    <DropdownMenuItem asChild>
-                                                        <Link
-                                                            href="/settings/survey"
-                                                            className={cn('w-full', path === '/settings/survey' && 'text-primary')}
-                                                        >
-                                                            <ThumbsUpIcon className="h-4 w-4" />
-                                                            <span>CSAT Survey</span>
-                                                        </Link>
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem asChild>
-                                                        <Link
-                                                            href="/settings/survey/report"
-                                                            className={cn(
-                                                                'w-full',
-                                                                path.startsWith('/settings/survey/report') && 'text-primary',
-                                                            )}
-                                                        >
-                                                            <BarChartIcon className="h-4 w-4" />
-                                                            <span>CSAT Report</span>
-                                                        </Link>
-                                                    </DropdownMenuItem>
-                                                </>
-                                            )}
-                                            {(usePage<PageProps>().props as any).activeModules?.includes('CustomerPortal') && (
-                                                <DropdownMenuItem asChild>
-                                                    <Link
-                                                        href="/settings/portal"
-                                                        className={cn('w-full', portalNavActive && 'text-primary')}
-                                                    >
-                                                        <GlobeIcon className="h-4 w-4" />
-                                                        <span>Customer Portal</span>
-                                                    </Link>
-                                                </DropdownMenuItem>
-                                            )}
-                                        </DropdownMenuGroup>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-                            </nav>
+                                                {currentSection.label}
+                                            </Link>
+                                            <ChevronRightIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                                            <span className="truncate font-medium">{currentItem.label}</span>
+                                        </>
+                                    ) : (
+                                        <span className="truncate font-medium">{currentSection.label}</span>
+                                    )}
+                                </nav>
+                            )}
 
                             <div className="ml-auto flex items-center gap-2">
                                 <button
