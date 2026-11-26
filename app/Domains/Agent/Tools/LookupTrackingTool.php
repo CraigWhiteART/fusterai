@@ -19,7 +19,11 @@ class LookupTrackingTool extends WriterTool
 
     public function schema(JsonSchema $schema): array
     {
-        return [];
+        // Never empty: a tool without a parameters object is rejected by
+        // OpenRouter's Responses API ("expected record, received undefined").
+        return [
+            'tracking_number' => $schema->string()->nullable()->description('A tracking number the customer quoted, or null for the shipment already in evidence')->required(),
+        ];
     }
 
     protected function run(array $arguments): string
