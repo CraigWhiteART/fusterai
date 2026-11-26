@@ -60,6 +60,137 @@ export interface NavSection {
     badges?: AgentNavBadge[];
 }
 
+/**
+ * What's on each page, so the sidebar search finds a setting without knowing
+ * which page it lives on. Keep these in step with the page's headings/labels.
+ */
+const KEYWORDS: Record<string, string[]> = {
+    '/dashboard': ['overview', 'stats', 'home'],
+    '/conversations': ['tickets', 'email', 'mine', 'unassigned', 'starred', 'pending', 'snoozed', 'closed'],
+    '/live-chat': ['chat', 'visitors'],
+    '/customers': ['contacts', 'people'],
+    '/reports': ['reports', 'metrics', 'response time', 'volume'],
+    '/agent': ['agent overview', 'status'],
+    '/agent/voice': ['tone', 'style', 'length guidance', 'maximum words', 'version history'],
+    '/agent/playbooks': ['scenarios', 'auto', 'rules for replies'],
+    '/agent/knowledge': ['facts', 'policies', 'answers'],
+    '/agent/proposals': ['suggestions', 'review'],
+    '/agent/manager': ['chat', 'ask', 'questions'],
+    '/agent/mining': ['learn', 'past conversations'],
+    '/agent/import': ['import', 'legacy', 'history'],
+    '/agent/simulations': ['test cases', 'tests'],
+    '/agent/qa': ['quality', 'review', 'grading'],
+    '/agent/shadow': ['shadow mode', 'compare', 'go live'],
+    '/agent/reports': ['metrics', 'performance'],
+    '/agent/settings': [
+        'mode',
+        'off',
+        'shadow',
+        'draft for review',
+        'live',
+        'auto-send',
+        'automatic sending',
+        'kill switch',
+        'pause ai agent',
+        'disclosure line',
+        'allowed domains',
+        'links',
+        'conversation status after send',
+    ],
+    '/agent/actions': ['shopify actions', 'approve', 'pending'],
+    '/agent/actions/policies': ['permissions', 'limits', 'refund', 'who can approve'],
+    '/agent/actions/audit': ['log', 'refunds', 'shopify history'],
+    '/agent/connections': [
+        'shopify',
+        'shop domain',
+        'api key',
+        'client id',
+        'client secret',
+        'tracking',
+        'parcel',
+        'stuck',
+        'pre-order tags',
+        'integrations',
+    ],
+    '/settings/ai': ['provider', 'anthropic', 'openai', 'claude', 'models', 'api key', 'embeddings', 'rag', 'reasoning', 'feature toggles'],
+    '/ai/knowledge-base': ['documents', 'articles', 'kb', 'help center'],
+    '/automation': ['rules', 'triggers', 'workflows', 'auto assign'],
+    '/settings': ['workspace name', 'slug', 'timezone', 'company name', 'company logo', 'website', 'branding'],
+    '/settings/users': ['users', 'members', 'invite', 'roles', 'admin', 'agents', 'staff'],
+    '/mailboxes': [
+        'imap',
+        'smtp',
+        'incoming mail',
+        'outgoing mail',
+        'gmail',
+        'auto-reply',
+        'office hours',
+        'auto-close',
+        'whatsapp',
+        'signature',
+    ],
+    '/settings/email': ['dns', 'spf', 'dkim', 'dmarc', 'deliverability'],
+    '/settings/modules': ['plugins', 'extensions', 'enable', 'features'],
+    '/settings/api-keys': ['tokens', 'api', 'integrations', 'mcp'],
+    '/settings/audit-log': ['activity', 'history', 'who changed'],
+    '/tags': ['labels', 'colors'],
+    '/settings/folders': ['organize'],
+    '/settings/canned-responses': ['templates', 'macros', 'saved replies', 'snippets'],
+    '/settings/routing': ['assignment', 'round robin', 'distribute'],
+    '/settings/sla': ['response time', 'deadlines', 'targets'],
+    '/settings/sla/report': ['breaches'],
+    '/settings/survey': ['csat', 'satisfaction', 'feedback', 'send delay'],
+    '/settings/survey/report': ['csat', 'satisfaction', 'ratings', 'responses'],
+    '/settings/appearance': ['theme', 'dark mode', 'light mode', 'colour', 'color', 'font', 'radius', 'contrast'],
+    '/settings/live-chat': ['widget', 'embed snippet', 'greeting', 'launcher', 'brand colour', 'position'],
+    '/settings/portal': ['help center', 'self-service', 'welcome message'],
+    '/profile': ['my profile', 'password', 'email signature', 'name', 'avatar'],
+};
+
+export interface NavSearchResult {
+    href: string;
+    label: string;
+    /** Where it lives in the sidebar, e.g. "Settings › Inbox setup". */
+    where: string;
+    /** The keyword that matched, when the label itself didn't. */
+    matched: string | null;
+}
+
+/** Every page in the nav (plus My Profile) containing all words of the query. */
+export function searchNav(sections: NavSection[], query: string): NavSearchResult[] {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+
+    const pages: { href: string; label: string; where: string }[] = [];
+    for (const section of sections) {
+        if (!section.groups) {
+            pages.push({ href: section.href, label: section.label, where: '' });
+            continue;
+        }
+        for (const group of section.groups) {
+            for (const item of group.items) {
+                pages.push({ href: item.href, label: item.label, where: [section.label, group.label].filter(Boolean).join(' › ') });
+            }
+        }
+    }
+    pages.push({ href: '/profile', label: 'My Profile', where: 'Account' });
+
+    const scored: (NavSearchResult & { score: number })[] = [];
+    for (const page of pages) {
+        const label = page.label.toLowerCase();
+        const keywords = KEYWORDS[page.href] ?? [];
+        const haystack = [label, page.where.toLowerCase(), ...keywords].join(' | ');
+        if (!words.every((w) => haystack.includes(w))) continue;
+
+        const labelHit = words.every((w) => label.includes(w));
+        const matched = labelHit ? null : (keywords.find((k) => words.some((w) => k.includes(w))) ?? null);
+        const score = label.startsWith(words[0]) ? 0 : labelHit ? 1 : matched ? 2 : 3;
+        scored.push({ href: page.href, label: page.label, where: page.where, matched, score });
+    }
+
+    return scored.sort((a, b) => a.score - b.score);
+}
+
 function cleanPath(path: string): string {
     return path.split('?')[0].replace(/\/+$/, '') || '/';
 }
