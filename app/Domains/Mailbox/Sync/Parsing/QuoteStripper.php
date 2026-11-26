@@ -35,6 +35,12 @@ final class QuoteStripper
 
     private const MOBILE_SIGNATURE = '/^\s*(?:Sent from my (?:iPhone|iPad|Android|Samsung|mobile)[^\n]*|Get Outlook for (?:iOS|Android)[^\n]*|Sent from (?:Mail|Yahoo Mail|Outlook) for [^\n]*)\s*$/iu';
 
+    /** A signature block longer than this is not treated as a signature. */
+    private const SIGNATURE_MAX_CHARS = 300;
+
+    /** Text that must remain outside a signature block for it to be removed. */
+    private const BODY_MIN_CHARS = 40;
+
     public function clean(?string $html, ?string $text): string
     {
         if ($html !== null && trim($html) !== '') {
@@ -213,11 +219,9 @@ final class QuoteStripper
             // Gmail: <div class="gmail_quote"> (incl. gmail_quote_container) and its attribution.
             "//*[contains(concat(' ', normalize-space(@class), ' '), ' gmail_quote') or contains(@class, 'gmail_quote_container')]",
             "//*[contains(concat(' ', normalize-space(@class), ' '), ' gmail_attr ')]",
-            "//*[contains(@class, 'gmail_signature') or @data-smartmail='gmail_signature']",
             // Apple Mail / Thunderbird.
             "//blockquote[@type='cite']",
             "//*[contains(@class, 'moz-cite-prefix')]",
-            "//*[contains(@class, 'moz-signature')]",
             // Yahoo.
             "//*[contains(@class, 'yahoo_quoted')]",
         ];
@@ -225,8 +229,39 @@ final class QuoteStripper
             $this->removeAll($xpath, $selector, false);
         }
 
+        $this->removeSignatures($doc, $xpath);
+
         // Outlook: everything from these markers to the end of their parent is history.
         $this->removeAll($xpath, "//*[@id='appendonsend' or @id='divRplyFwdMsg' or starts-with(@id, 'x_divRplyFwdMsg') or @id='mail-editor-reference-message-container']", true);
+    }
+
+    /**
+     * A signature block is removed only when it looks like one: short, and
+     * with a real message outside it. Some people type the whole reply inside
+     * Gmail's signature block; removing it then would leave only "Hi Sam,".
+     */
+    private function removeSignatures(DOMDocument $doc, DOMXPath $xpath): void
+    {
+        $nodes = $xpath->query("//*[contains(@class, 'gmail_signature') or @data-smartmail='gmail_signature' or contains(@class, 'moz-signature')]");
+        if ($nodes === false) {
+            return;
+        }
+
+        $length = fn (?string $text): int => mb_strlen(trim((string) preg_replace('/\s+/u', ' ', (string) $text)));
+        $total = $length($doc->documentElement?->textContent);
+
+        /** @var list<DOMNode> $list */
+        $list = iterator_to_array($nodes);
+        foreach ($list as $node) {
+            if ($node->parentNode === null) {
+                continue;
+            }
+            $signature = $length($node->textContent);
+            if ($signature <= self::SIGNATURE_MAX_CHARS && $total - $signature >= self::BODY_MIN_CHARS) {
+                $node->parentNode->removeChild($node);
+                $total -= $signature;
+            }
+        }
     }
 
     private function removeAll(DOMXPath $xpath, string $selector, bool $withFollowing): void

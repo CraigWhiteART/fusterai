@@ -127,3 +127,26 @@ test('clean() prefers html and falls back to text', function () {
         ->and($stripper->clean('   ', 'Only text'))->toBe('Only text')
         ->and($stripper->clean(null, null))->toBe('');
 });
+
+test('a reply typed inside the Gmail signature block is kept', function () {
+    $html = '<div dir="ltr"><div>Hi Sam👋</div><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">'
+        .'<div>I can see you ordered four, and the discount was not applied. I can adjust this for you today.</div>'
+        .'<div><br>Kind Regards,<br>Natalie<br>example.net</div></div></div></div><br>'
+        .'<div class="gmail_quote gmail_quote_container"><div class="gmail_attr">On Thu, Mar 5, 2026 at 2:40 AM Sam &lt;sam@example.com&gt; wrote:<br></div>'
+        .'<blockquote class="gmail_quote">Where is my discount?</blockquote></div>';
+
+    $clean = (new QuoteStripper)->clean($html, null);
+
+    expect($clean)->toContain('Hi Sam')
+        ->toContain('I can adjust this for you today.')
+        ->not->toContain('Where is my discount');
+});
+
+test('a short signature block under a real message is still removed', function () {
+    $html = '<div dir="ltr"><div>Hi Sam, your order shipped this morning and the tracking link is on its way.</div>'
+        .'<div class="gmail_signature" data-smartmail="gmail_signature">Kind Regards,<br>Natalie<br>example.net</div></div>';
+
+    expect((new QuoteStripper)->clean($html, null))
+        ->toContain('your order shipped this morning')
+        ->not->toContain('Kind Regards');
+});

@@ -642,7 +642,15 @@ class AgentPipeline
         $state['writer_note'] = isset($sub['internal_note']) ? mb_substr((string) $sub['internal_note'], 0, 2000) : null;
 
         if (is_string($reason) && trim($reason) !== '') {
-            $state['writer_handover'] = mb_substr(Str::snake(trim($reason)), 0, 60);
+            // Models often write a sentence here instead of a code: keep the
+            // code list for reports, and the sentence as the note.
+            $code = Str::snake(trim($reason));
+            if (in_array($code, HandoverTool::REASONS, true)) {
+                $state['writer_handover'] = $code;
+            } else {
+                $state['writer_handover'] = 'other';
+                $state['writer_note'] = mb_substr(trim(trim($reason).' '.(string) ($state['writer_note'] ?? '')), 0, 2000);
+            }
             $state['draft'] = null;
 
             return $state;
