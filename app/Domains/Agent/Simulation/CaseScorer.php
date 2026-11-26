@@ -21,13 +21,21 @@ use Throwable;
  * actually sent. When evidence is below `recorded`, the judge scores
  * outcome, policy and tone and factual differences are not penalised.
  *
+ * Test cases mined from history describe what the human did in the miner's
+ * own words ("no sales planned"), and expect the actions the human took even
+ * where the agent is not allowed them. For those, the points go to the judge
+ * instead of being matched as text, and expected actions are not checked.
+ *
  * passed = expectations met AND judge would_send AND outcome, policy (and,
  * with recorded evidence, facts) >= 3. Judge failure => passed null (error),
  * unless an expectation already failed.
  */
 class CaseScorer
 {
-    public const VERSION = 'scorer-v1';
+    public const VERSION = 'scorer-v2';
+
+    /** Test cases written by history mining: their expectations are points, not exact phrases. */
+    private const SOURCE_MINING = 'mining';
 
     public function __construct(
         private readonly AiSettingsService $ai,
@@ -73,6 +81,9 @@ class CaseScorer
             return ['checked' => false, 'passed' => null, 'failures' => []];
         }
         $e = AgentTestCase::normalizeExpectation($testCase->expectation);
+        if ($testCase->source === self::SOURCE_MINING) {
+            $e['must_include'] = $e['must_not_include'] = $e['expected_actions'] = [];
+        }
         $draft = mb_strtolower((string) $run->draft);
         $failures = [];
 
@@ -105,6 +116,26 @@ class CaseScorer
         return ['checked' => $checked, 'passed' => $checked ? $failures === [] : null, 'failures' => $failures];
     }
 
+    /**
+     * @param  array<string, mixed>|null  $expect
+     */
+    private function points(?AgentTestCase $testCase, ?array $expect): ?string
+    {
+        if ($testCase === null || $expect === null || $testCase->source !== self::SOURCE_MINING) {
+            return null;
+        }
+        $lines = [];
+        if ($expect['must_include'] !== []) {
+            $lines[] = 'POINTS FROM THE HUMAN REPLY: '.implode('; ', $expect['must_include']);
+        }
+        if ($expect['must_not_include'] !== []) {
+            $lines[] = 'POINTS TO AVOID: '.implode('; ', $expect['must_not_include']);
+        }
+
+        return $lines === [] ? null : implode('
+', $lines);
+    }
+
     /** @return array<string, mixed> */
     private function judge(FrozenCase $case, ?AgentTestCase $testCase, AgentRun $run, InstructionSet $instructions): array
     {
@@ -118,6 +149,7 @@ class CaseScorer
             'The human reply is the reference, not gospel: if the human broke a brand rule, the AI following the rule is correct.',
             'Brand voice: '.$instructions->voice->personality,
             $instructions->voice->dontTexts() !== [] ? 'Never say: '.implode('; ', $instructions->voice->dontTexts()) : null,
+            'If POINTS FROM THE HUMAN REPLY are listed, they summarise what the human said. A reply that leaves out a point the customer needs, or makes a point listed as one to avoid, is not sendable. Wording does not have to match.',
             'Return the scores and one or two sentences of reasoning.',
         ]));
 
@@ -137,6 +169,7 @@ class CaseScorer
             $untrusted->block('ai_output', $ai),
             'EVIDENCE QUALITY: '.$case->evidence_quality,
             $expect !== null && $expect['notes'] !== null ? 'REVIEWER NOTES FOR THIS CASE: '.$expect['notes'] : null,
+            $this->points($testCase, $expect),
         ]));
 
         try {

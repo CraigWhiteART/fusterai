@@ -103,6 +103,19 @@ test('deterministic expectations fail a case before the judge is trusted', funct
         ->and($result->judge_notes)->toContain('contains "guaranteed"');
 });
 
+test('expectations mined from history are judged as points, not matched as text', function () {
+    $f = loopTSimFixture(['must_include' => ['no sales planned'], 'expected_actions' => ['discount_code']]);
+    $f['test']->forceFill(['source' => 'mining'])->save();
+    loopTFakePipeline(['We do not have a sale coming up.']);
+    loopTFakeJudge();
+
+    $sim = app(SimulationService::class)->createPlaybookTests($f['playbook'], null);
+
+    $result = SimulationResult::where('simulation_id', $sim->id)->sole();
+    expect($result->scores['deterministic']['failures'])->toBe([])
+        ->and($result->verdict)->toBe('pass');
+});
+
 test('the judge does not score facts when evidence is not recorded', function () {
     $f = loopTWorkspace();
     $case = loopTFrozenCase($f);
