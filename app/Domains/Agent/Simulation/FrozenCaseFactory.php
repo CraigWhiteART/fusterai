@@ -212,6 +212,13 @@ class FrozenCaseFactory
         if ($shopify === null) {
             return null;
         }
+        // Snapshots from before the order email was recorded cannot pass the
+        // sender check, so every replay would withhold the order: leave the
+        // case to be reconstructed instead.
+        $payload = (array) $shopify->payload;
+        if (($payload['found'] ?? false) && ! array_key_exists('order_email', $payload)) {
+            return null;
+        }
 
         return [
             'source' => FrozenCase::QUALITY_RECORDED,

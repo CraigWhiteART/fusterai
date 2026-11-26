@@ -266,6 +266,9 @@ class AgentPipeline
         $country = $ledger->valueOf('shopify.shipping_country_code');
 
         $missing = $playbook !== null ? $this->missingEvidence($playbook, $ledger, $input) : [];
+        if ($missing !== []) {
+            $ledger->note('This playbook needs evidence that is missing: '.implode(', ', $missing).'. Ask the customer for it in the reply (order number, photos) where they can provide it. Do not decide or promise anything that depends on it.');
+        }
 
         $state = [
             'draft' => null,

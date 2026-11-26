@@ -102,12 +102,9 @@ final class PolicyGate
         if ($in['playbook']['mode'] === Playbook::MODE_OFF) {
             return $handover('playbook_off');
         }
-        if ($in['order_withheld']) {
-            return $handover('order_email_mismatch');
-        }
-        if ($in['missing_evidence'] !== []) {
-            return $handover('missing_evidence:'.implode(',', $in['missing_evidence']));
-        }
+        // A withheld order or missing evidence does not stop the writer: staff
+        // answer these by asking for what is missing, so the agent drafts that
+        // reply. Both block auto-send (see autoSendBlockers).
         if ($in['writer_handover'] !== null) {
             return $handover('writer:'.$in['writer_handover']);
         }
@@ -174,6 +171,8 @@ final class PolicyGate
         $check(($in['validator_passed'] ?? null) === true, 'validator');
         $check((int) ($a['rewrites'] ?? 1) === 0, 'rewritten');
         $check(($in['risk_flags'] ?? ['unknown']) === [], 'risk_flags');
+        $check(($in['order_withheld'] ?? true) === false, 'order_email_mismatch');
+        $check(($in['missing_evidence'] ?? ['unknown']) === [], 'missing_evidence');
         $check(($a['claims_grounded'] ?? false) === true, 'claims_ungrounded');
         // Action-dependent replies: auto-send only when every proposed action
         // is set to run unattended (policy `always`; computed in

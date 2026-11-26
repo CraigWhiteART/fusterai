@@ -40,7 +40,7 @@ class LookupOrderTool extends WriterTool
         $number = strtoupper(ltrim(trim((string) ($arguments['order_number'] ?? '')), '#'));
 
         if ($ledger->meta('order_withheld')) {
-            return 'Order details are withheld: the order email does not match the sender. Do not disclose any order information; hand over.';
+            return 'Order details are withheld: the order email does not match the sender. Do not disclose any order information. You may answer in general terms and ask the customer to reply from the email address used on the order, or to confirm it.';
         }
 
         $current = strtoupper(ltrim((string) $ledger->valueOf('shopify.order_number'), '#'));

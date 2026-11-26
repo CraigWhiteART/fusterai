@@ -167,17 +167,20 @@ test('an order whose email does not match the sender is never disclosed', functi
     agentTEnableShopify($case['workspace']->id);
     Http::fake(['https://test-shop.myshopify.com/admin/api/*' => Http::response(agentTShopifyPayload('someone-else@example.com'))]);
     agentTFakeTriage('order_status');
-    agentTFakeWriter(['reply' => 'never']);
+    agentTFakeWriter(['reply' => 'Hi Alex, could you reply from the email address used on the order so I can check it?']);
+    agentTFakeValidator('pass');
 
     $run = agentTRunLive($case);
 
-    expect($run->decision)->toBe('handover')
-        ->and($run->handover_reason)->toBe('order_email_mismatch')
+    // The writer still drafts (asking the customer to confirm who they are),
+    // but sees no order facts and the reply can never be auto-sent.
+    expect($run->decision)->toBe('draft')
+        ->and($run->auto_send['blockers'])->toContain('order_email_mismatch')
         ->and(collect($run->evidence['facts'])->where('source', 'shopify'))->toBeEmpty()
         ->and($run->evidence['meta']['order_withheld'])->toBeTrue()
-        ->and($run->internal_note)->not->toContain('UNFULFILLED')
-        ->and($run->internal_note)->not->toContain('PAID');
-    WriterAgent::assertNeverPrompted();
+        ->and(implode(' ', $run->evidence['notes']))->toContain('withheld')
+        ->and($run->draft)->not->toContain('UNFULFILLED')
+        ->and($run->draft)->not->toContain('PAID');
 });
 
 test('a matching order email puts order facts in the evidence ledger and order notes stay untrusted data', function () {
@@ -385,7 +388,7 @@ test('tokens and cost are recorded from every model call', function () {
         ->and(collect($run->trace['usage'])->pluck('step')->all())->toBe(['triage', 'writer', 'writer_fallback', 'validator']);
 });
 
-test('required evidence that is missing hands over', function () {
+test('required evidence that is missing is asked for in a draft that cannot auto-send', function () {
     $case = agentTCase('Hi, where is my parcel?');
     app(AgentBootstrapper::class)->ensureForWorkspace($case['workspace']->id);
     $playbook = Playbook::where('workspace_id', $case['workspace']->id)->where('slug', 'tracking_problem')->sole();
@@ -394,12 +397,14 @@ test('required evidence that is missing hands over', function () {
         'required_evidence' => ['tracking'],
     ]);
     agentTFakeTriage('tracking_problem');
-    agentTFakeWriter(['reply' => 'never']);
+    agentTFakeWriter(['reply' => 'Hi Alex, could you send me your order number so I can look into it?']);
+    agentTFakeValidator('pass');
 
     $run = agentTRunLive($case);
 
-    expect($run->handover_reason)->toBe('missing_evidence:tracking');
-    WriterAgent::assertNeverPrompted();
+    expect($run->decision)->toBe('draft')
+        ->and($run->auto_send['blockers'])->toContain('missing_evidence')
+        ->and(implode(' ', $run->evidence['notes']))->toContain('missing: tracking');
 });
 
 test('preflight skips auto replies, answered conversations, the kill switch and modes that do not own drafts', function () {

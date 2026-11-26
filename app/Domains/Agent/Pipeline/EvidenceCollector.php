@@ -168,7 +168,7 @@ class EvidenceCollector
         if ($hasOrder && ! $this->emailMatches($input, $payload)) {
             $ledger->setMeta('order_email_match', false);
             $ledger->setMeta('order_withheld', true);
-            $ledger->note('An order matched the order number in the mail, but its email does not match the sender. Order details are withheld and must not be disclosed.');
+            $ledger->note('An order matched the order number in the mail, but its email does not match the sender. Order details are withheld and must not be disclosed. Reply in general terms only and ask the customer to write from the email address used on the order, or to confirm it.');
 
             return;
         }

@@ -30,7 +30,7 @@ class LookupTrackingTool extends WriterTool
     {
         $ledger = $this->session->ledger;
         if ($ledger->meta('order_withheld')) {
-            return 'Tracking is withheld: the order email does not match the sender. Hand over.';
+            return 'Tracking is withheld: the order email does not match the sender. Do not disclose tracking details; ask the customer to reply from the email address used on the order, or to confirm it.';
         }
 
         $lines = array_map(fn ($f) => "[{$f['id']}] {$f['label']}: {$f['value']}", $ledger->facts('tracking'));
