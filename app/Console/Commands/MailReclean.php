@@ -57,6 +57,29 @@ class MailReclean extends Command
                 }
             });
 
+        // Customer threads from before the mail ledger: their plain text was
+        // made by the old importer, which left CSS and template markup in.
+        $legacy = 0;
+        DB::table('threads')
+            ->where('type', 'message')
+            ->whereNotNull('customer_id')
+            ->whereNull('mail_message_id')
+            ->where('body', 'like', '%<%')
+            ->select(['id', 'body', 'body_plain'])
+            ->orderBy('id')
+            ->chunkById(200, function ($rows) use ($stripper, $apply, &$legacy) {
+                foreach ($rows as $row) {
+                    $new = $stripper->clean((string) $row->body, null);
+                    if ($new !== '' && $new !== (string) $row->body_plain) {
+                        $legacy++;
+                        if ($apply) {
+                            DB::table('threads')->where('id', $row->id)->update(['body_plain' => $new]);
+                        }
+                    }
+                }
+            });
+        $this->info("{$legacy} pre-ledger customer threads ".($apply ? 'updated' : 'would change').'.');
+
         $this->info("{$seen} messages checked; {$changed} cleaned texts ".($apply ? 'updated' : 'would change')."; {$threads} threads ".($apply ? 'updated' : 'would change').'.');
         if (! $apply) {
             $this->warn('Dry run. Add --apply to make the changes.');
