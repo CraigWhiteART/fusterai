@@ -65,7 +65,9 @@ class ComposeReplyAgent implements Agent, HasProviderOptions, HasStructuredOutpu
             'handover_reason' => $schema->string()->nullable()
                 ->description('Set (and leave reply empty) when a human must take over; null otherwise')->required(),
             'internal_note' => $schema->string()
-                ->description('Short note for the support agent: what you found and anything they should check')->required(),
+                ->description('Short note for the support agent: what you found and anything they should check or decide')->required(),
+            'needs_human' => $schema->boolean()
+                ->description('true when the reply is a holding reply: a teammate must still decide or do something (cancel, refund, replace, change an order, check with the warehouse or courier)')->required(),
         ];
     }
 }

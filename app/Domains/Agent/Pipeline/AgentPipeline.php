@@ -275,6 +275,7 @@ class AgentPipeline
             'claims' => [],
             'rules_used' => [],
             'writer_handover' => null,
+            'needs_human' => false,
             'writer_note' => null,
             'knowledge' => [],
             'proposed_actions' => [],
@@ -660,6 +661,7 @@ class AgentPipeline
         }
 
         $state['draft'] = trim((string) ($sub['reply'] ?? ''));
+        $state['needs_human'] = (bool) ($sub['needs_human'] ?? false);
         $state['claims'] = array_values(array_map(fn ($claim) => [
             'text' => (string) ($claim['text'] ?? ''),
             'sources' => array_values(array_map('strval', (array) ($claim['sources'] ?? []))),
@@ -745,6 +747,7 @@ class AgentPipeline
             'rollout_bucket' => PolicyGate::rolloutBucket($input->conversation->id ?? $input->frozenCaseId),
             'risk_flags' => $flags,
             'writer_handover' => $state['writer_handover'],
+            'needs_human' => (bool) ($state['needs_human'] ?? false),
             'order_withheld' => (bool) $ledger->meta('order_withheld'),
             'missing_evidence' => $missing,
             'validator_passed' => $state['validator_passed'],

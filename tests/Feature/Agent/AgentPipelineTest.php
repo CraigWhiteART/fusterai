@@ -388,6 +388,19 @@ test('tokens and cost are recorded from every model call', function () {
         ->and(collect($run->trace['usage'])->pluck('step')->all())->toBe(['triage', 'writer', 'writer_fallback', 'validator']);
 });
 
+test('a holding reply is a draft that waits for a teammate', function () {
+    $case = agentTCase('Please cancel my order.');
+    agentTFakeTriage('order_status');
+    agentTFakeWriter(['reply' => 'Hi Alex, I have passed your cancellation request to the team.', 'needs_human' => true, 'internal_note' => 'Cancel the order if it has not shipped.']);
+    agentTFakeValidator('pass');
+
+    $run = agentTRunLive($case);
+
+    expect($run->decision)->toBe('draft')
+        ->and($run->auto_send['blockers'])->toContain('needs_human')
+        ->and($run->internal_note)->toContain('Cancel the order');
+});
+
 test('required evidence that is missing is asked for in a draft that cannot auto-send', function () {
     $case = agentTCase('Hi, where is my parcel?');
     app(AgentBootstrapper::class)->ensureForWorkspace($case['workspace']->id);

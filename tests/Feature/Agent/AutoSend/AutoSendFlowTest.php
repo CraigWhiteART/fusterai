@@ -351,7 +351,7 @@ test('a proposed action that cannot run unattended keeps the reply a draft', fun
 
     $gate = PolicyGate::decide([
         'agent_mode' => 'live', 'kill_switch' => false, 'playbook' => ['mode' => 'auto', 'rollout_percent' => 100, 'always_human' => false],
-        'rollout_bucket' => 1, 'risk_flags' => [], 'writer_handover' => null, 'order_withheld' => false, 'missing_evidence' => [],
+        'rollout_bucket' => 1, 'risk_flags' => [], 'writer_handover' => null, 'needs_human' => false, 'order_withheld' => false, 'missing_evidence' => [],
         'validator_passed' => true, 'validator_error' => false, 'has_draft' => true,
         'proposed_actions' => [['action' => 'refund', 'status' => 'proposed']], 'auto_send' => $context,
     ]);

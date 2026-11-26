@@ -326,6 +326,28 @@ export function DraftWhy({ run, isAdmin, conversationId }: Props) {
         .filter(Boolean)
         .join(' · ');
 
+    const note = run.internal_note?.trim();
+    const blockers = Array.isArray(run.auto_send?.blockers) ? run.auto_send!.blockers! : [];
+    const needsHuman = blockers.includes('needs_human');
+
+    return (
+        <>
+            {note && (
+                <p
+                    className={`mb-2 whitespace-pre-wrap rounded-md border px-2.5 py-1.5 text-xs leading-relaxed ${
+                        needsHuman ? 'border-warning/40 bg-warning/10' : 'border-border bg-background'
+                    }`}
+                >
+                    <span className="font-medium">{needsHuman ? 'Needs you before or after sending: ' : 'Note from the agent: '}</span>
+                    {note}
+                </p>
+            )}
+            <DraftWhyDetails run={run} isAdmin={isAdmin} conversationId={conversationId} summary={summary} />
+        </>
+    );
+}
+
+function DraftWhyDetails({ run, isAdmin, conversationId, summary }: Props & { summary: string }) {
     return (
         <details className="mb-2 rounded-md border border-info/20 bg-background px-2.5 py-1.5 text-xs">
             <summary className="cursor-pointer select-none text-muted-foreground">

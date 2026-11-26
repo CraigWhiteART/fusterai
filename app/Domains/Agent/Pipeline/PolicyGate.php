@@ -70,6 +70,7 @@ final class PolicyGate
      *     rollout_bucket: int,
      *     risk_flags: list<string>,
      *     writer_handover: string|null,
+     *     needs_human?: bool,
      *     order_withheld: bool,
      *     missing_evidence: list<string>,
      *     validator_passed: bool|null,
@@ -173,6 +174,8 @@ final class PolicyGate
         $check(($in['risk_flags'] ?? ['unknown']) === [], 'risk_flags');
         $check(($in['order_withheld'] ?? true) === false, 'order_email_mismatch');
         $check(($in['missing_evidence'] ?? ['unknown']) === [], 'missing_evidence');
+        // A holding reply: the writer says a teammate must still decide or act.
+        $check(($in['needs_human'] ?? true) === false, 'needs_human');
         $check(($a['claims_grounded'] ?? false) === true, 'claims_ungrounded');
         // Action-dependent replies: auto-send only when every proposed action
         // is set to run unattended (policy `always`; computed in
