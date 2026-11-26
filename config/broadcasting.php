@@ -35,11 +35,21 @@ return [
             'key' => env('REVERB_APP_KEY'),
             'secret' => env('REVERB_APP_SECRET'),
             'app_id' => env('REVERB_APP_ID'),
+            // Where the app publishes events. Behind a web server that only
+            // proxies the websocket path, set REVERB_BACKEND_* to the Reverb
+            // server itself (e.g. 127.0.0.1 / 8080 / http); REVERB_HOST stays
+            // the public address browsers connect to.
             'options' => [
+                'host' => env('REVERB_BACKEND_HOST', env('REVERB_HOST')),
+                'port' => env('REVERB_BACKEND_PORT', env('REVERB_PORT', 443)),
+                'scheme' => env('REVERB_BACKEND_SCHEME', env('REVERB_SCHEME', 'https')),
+                'useTLS' => env('REVERB_BACKEND_SCHEME', env('REVERB_SCHEME', 'https')) === 'https',
+            ],
+            // What browsers connect to.
+            'public' => [
                 'host' => env('REVERB_HOST'),
                 'port' => env('REVERB_PORT', 443),
                 'scheme' => env('REVERB_SCHEME', 'https'),
-                'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
             ],
             'client_options' => [
                 // Guzzle client options: https://docs.guzzlephp.org/en/stable/request-options.html

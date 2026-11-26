@@ -264,9 +264,9 @@ class SettingsController extends Controller
             ],
             'snippet' => [
                 'wsKey' => config('broadcasting.connections.reverb.key'),
-                'wsHost' => config('broadcasting.connections.reverb.options.host'),
-                'wsPort' => config('broadcasting.connections.reverb.options.port'),
-                'wsScheme' => config('broadcasting.connections.reverb.options.scheme', 'http'),
+                'wsHost' => config('broadcasting.connections.reverb.public.host'),
+                'wsPort' => config('broadcasting.connections.reverb.public.port'),
+                'wsScheme' => config('broadcasting.connections.reverb.public.scheme', 'http'),
                 'apiBase' => config('app.url'),
             ],
         ]);
