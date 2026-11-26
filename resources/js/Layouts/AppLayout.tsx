@@ -172,6 +172,12 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
     const isCommunicationWorkspace = path.startsWith('/conversations') || path.startsWith('/live-chat');
     // The mobile drawer is always the full sidebar, even if the desktop one is collapsed to icons.
     const rail = collapsed && !mobileOpen;
+    const navRef = React.useRef<HTMLElement>(null);
+
+    // Each page mounts a fresh sidebar scrolled to the top; bring the current page's link into view.
+    React.useEffect(() => {
+        navRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
+    }, [path]);
 
     React.useEffect(() => {
         applyAppearance(appearance);
@@ -268,7 +274,7 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
         cn(
             'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
             active
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold'
+                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-[inset_2px_0_0_var(--sidebar-primary)]'
                 : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/45 hover:text-sidebar-foreground',
         );
 
@@ -581,7 +587,11 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                         </div>
                     )}
 
-                    <nav aria-label="Main" className="relative z-10 flex-1 overflow-y-auto py-3 px-2.5 space-y-0.5">
+                    <nav
+                        ref={navRef}
+                        aria-label="Main"
+                        className="sidebar-scroll relative z-10 flex-1 overflow-y-auto py-3 px-2.5 space-y-0.5"
+                    >
                         {sections.map(renderSection)}
                     </nav>
 

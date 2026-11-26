@@ -161,7 +161,7 @@
     --ring: oklch(0.708 0 0);
     --sidebar-primary: oklch(0.922 0 0);
     --sidebar-primary-foreground: oklch(0.205 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent: oklch(0.32 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
 }
 
@@ -299,4 +299,10 @@
     --sidebar-muted: color-mix(in oklab, var(--background) 72%, var(--primary) 28%);
     --sidebar-accent: color-mix(in oklab, var(--primary) 72%, var(--background) 28%);
     --sidebar-accent-foreground: var(--primary-foreground);
+}
+
+/* Quiet sidebar scrollbar instead of the bright OS default. */
+.sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--sidebar-foreground) 22%, transparent) transparent;
 }
