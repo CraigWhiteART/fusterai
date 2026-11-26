@@ -7,17 +7,17 @@ use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Ai\Attributes\MaxTokens;
 use Laravel\Ai\Attributes\Model;
 use Laravel\Ai\Attributes\Provider;
-use Laravel\Ai\Attributes\Temperature;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\HasProviderOptions;
 use Laravel\Ai\Contracts\HasStructuredOutput;
 use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Promptable;
 
+// No #[Temperature]: current Claude models reject sampling parameters, and
+// MaxTokens leaves room for adaptive thinking, which counts toward it.
 #[Provider(Lab::Anthropic)]
-#[Model('claude-haiku-4-5-20251001')]
-#[MaxTokens(256)]
-#[Temperature(0.1)]
+#[Model('claude-haiku-5-5')]
+#[MaxTokens(2048)]
 class CategorizationAgent implements Agent, HasProviderOptions, HasStructuredOutput
 {
     use HasConfigurableProviderOptions;

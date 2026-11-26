@@ -3,6 +3,7 @@
 use App\Http\Middleware\ConfigureAiSettings;
 use App\Http\Middleware\EnsureModuleIsActive;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\RenderPageUnlessJson;
 use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -32,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'module.active' => EnsureModuleIsActive::class,
+            'page' => RenderPageUnlessJson::class,
         ]);
 
         $middleware->api(prepend: [

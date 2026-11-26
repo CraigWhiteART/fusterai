@@ -14,10 +14,14 @@ class LiveChatService
 {
     /**
      * Resolve (or create) the customer and their open chat conversation,
-     * then dispatch the message job. Returns the conversation ID so the
-     * widget can subscribe to the real-time channel immediately.
+     * then dispatch the message job. Returns the conversation id and the
+     * chat token: the widget subscribes to `livechat.{chat_token}` and sends
+     * the token back on the history and typing calls.
      *
-     * @return array{status: string, conversation_id: int}
+     * An open conversation is only reused for the same visitor id, so posting
+     * with somebody else's email never hands over their chat (or its token).
+     *
+     * @return array{status: string, conversation_id: int, chat_token: string}
      */
     public function store(array $validated): array
     {
@@ -34,6 +38,7 @@ class LiveChatService
             $existing = Conversation::where('workspace_id', $validated['workspace_id'])
                 ->where('customer_id', $customer->id)
                 ->where('channel_type', ChannelType::Chat)
+                ->where('channel_id', $validated['visitor_id'])
                 ->where('status', ConversationStatus::Open)
                 ->latest()
                 ->lockForUpdate()
@@ -54,6 +59,8 @@ class LiveChatService
             ]);
         });
 
+        $token = $conversation->ensureChatToken();
+
         HandleLiveChatMessageJob::dispatch(
             $conversation,
             $customer,
@@ -63,34 +70,52 @@ class LiveChatService
         return [
             'status' => 'sent',
             'conversation_id' => $conversation->id,
+            'chat_token' => $token,
         ];
     }
 
     /**
-     * Fetch message threads for a visitor's conversation.
-     * workspace_id is required to scope the customer lookup and prevent cross-workspace leakage.
+     * The visitor's chat conversation, or null. Proof is the chat token, or
+     * (for widget sessions started before tokens existed) the visitor id the
+     * conversation was opened with / the visitor's placeholder email.
      */
-    public function messages(string $visitorId, int $conversationId, int $workspaceId): Collection
+    public function findForVisitor(int $conversationId, int $workspaceId, ?string $chatToken, ?string $visitorId): ?Conversation
     {
-        $email = "visitor_{$visitorId}@livechat.local";
-        $customer = Customer::where('workspace_id', $workspaceId)
-            ->where('email', $email)
-            ->first();
-
-        if (! $customer) {
-            return collect();
-        }
-
         $conversation = Conversation::where('id', $conversationId)
             ->where('workspace_id', $workspaceId)
-            ->where('customer_id', $customer->id)
             ->where('channel_type', ChannelType::Chat)
             ->first();
 
         if (! $conversation) {
-            return collect();
+            return null;
         }
 
+        if (filled($chatToken)) {
+            return filled($conversation->chat_token) && hash_equals((string) $conversation->chat_token, (string) $chatToken)
+                ? $conversation
+                : null;
+        }
+
+        if (! filled($visitorId)) {
+            return null;
+        }
+
+        if ($conversation->channel_id !== null && hash_equals((string) $conversation->channel_id, (string) $visitorId)) {
+            return $conversation;
+        }
+
+        $email = "visitor_{$visitorId}@livechat.local";
+        $matchesCustomer = Customer::where('id', $conversation->customer_id)
+            ->where('workspace_id', $workspaceId)
+            ->where('email', $email)
+            ->exists();
+
+        return $matchesCustomer ? $conversation : null;
+    }
+
+    /** Message threads of a visitor's conversation. */
+    public function messages(Conversation $conversation): Collection
+    {
         return $conversation->threads()
             ->with(['user:id,name,avatar', 'customer:id,name'])
             ->where('type', 'message')

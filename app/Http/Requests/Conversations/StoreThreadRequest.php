@@ -21,6 +21,8 @@ class StoreThreadRequest extends FormRequest
             'attachments' => ['nullable', 'array'],
             'attachments.*' => ['file', 'max:20480'],
             'send_at' => ['nullable', 'date', 'after:now'],
+            // Confirms a reply while the agent's draft waits on a Shopify action (ReplySendGuard).
+            'send_anyway' => ['nullable', 'boolean'],
         ];
     }
 }

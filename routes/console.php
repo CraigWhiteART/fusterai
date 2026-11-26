@@ -5,8 +5,20 @@ use App\Domains\Mailbox\Models\Mailbox;
 use App\Events\ConversationUpdated;
 use Illuminate\Support\Facades\Schedule;
 
-// Fetch emails every minute
-Schedule::command('emails:fetch')->everyMinute()->withoutOverlapping();
+// Sync new mail into the ledger every minute and queue it for ingest. The
+// overlap lock expires after 15 minutes (default is 24h) so a killed run
+// cannot stop mail for a day; FetchEmails also locks per mailbox.
+Schedule::command('emails:fetch')->everyMinute()->withoutOverlapping(15);
+
+// Re-queue history backfills whose job chain was lost (killed worker, Redis
+// flush). A healthy run checkpoints every few minutes and is left alone.
+Schedule::command('mail:backfill --recover')->everyFiveMinutes()->withoutOverlapping(10);
+
+// Same watchdog for history mining runs (docs/agent-mining.md).
+Schedule::command('agent:mine --recover')->everyFiveMinutes()->withoutOverlapping(10);
+
+// AI auto-send circuit breakers (docs/agent-autosend.md): only ever demote.
+Schedule::command('agent:autosend-breakers')->everyFifteenMinutes()->withoutOverlapping(10);
 
 // Wake snoozed conversations back to open
 Schedule::call(function () {

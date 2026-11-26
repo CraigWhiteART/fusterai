@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Domains\Commerce\Actions\ReplySendGuard;
 use App\Domains\Conversation\Models\Conversation;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\ConversationIndexRequest;
@@ -159,6 +160,10 @@ class ConversationApiController extends Controller
         abort_if($conversation->workspace_id !== $request->user()->workspace_id, 404, 'Not found.');
 
         $validated = $request->validated();
+
+        if (($validated['type'] ?? 'message') === 'message') {
+            app(ReplySendGuard::class)->check($conversation, $validated['body'], $request->boolean('send_anyway'), $request->user());
+        }
 
         $thread = $this->service->replyViaApi(
             $conversation,

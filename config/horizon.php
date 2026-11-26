@@ -98,6 +98,7 @@ return [
 
     'waits' => [
         'redis:default' => 60,
+        'redis-long:ai-bulk' => 1800,
     ],
 
     /*
@@ -207,7 +208,7 @@ return [
             'maxJobs' => 0,
             'memory' => 128,
             'tries' => 1,
-            'timeout' => 60,
+            'timeout' => 90,
             'nice' => 0,
         ],
     ],
@@ -230,7 +231,7 @@ return [
                 'processes' => 5,
                 'maxProcesses' => 10,
                 'tries' => 168,   // retry hourly for a week
-                'timeout' => 120,
+                'timeout' => 150, // SendReplyJob declares 120
             ],
             'ai' => [
                 'connection' => 'redis',
@@ -239,7 +240,18 @@ return [
                 'processes' => 4,
                 'maxProcesses' => 8,
                 'tries' => 3,
-                'timeout' => 60,
+                'timeout' => 330, // longest ai job (GenerateReplySuggestionJob) declares 300
+            ],
+            'ai-bulk' => [
+                // Long batch work (history mining, backfills). Own connection so
+                // its retry_after (960s) can exceed this timeout without slowing
+                // crash recovery for everything else on "redis".
+                'connection' => 'redis-long',
+                'queue' => ['ai-bulk'],
+                'balance' => 'simple',
+                'processes' => 1,
+                'tries' => 1,
+                'timeout' => 900,
             ],
             'notifications' => [
                 'connection' => 'redis',
@@ -257,7 +269,7 @@ return [
                 'processes' => 3,
                 'maxProcesses' => 6,
                 'tries' => 5,
-                'timeout' => 30,
+                'timeout' => 150, // ProcessWhatsAppWebhookJob declares 120
             ],
             'default' => [
                 'connection' => 'redis',
@@ -266,7 +278,7 @@ return [
                 'processes' => 2,
                 'maxProcesses' => 4,
                 'tries' => 3,
-                'timeout' => 60,
+                'timeout' => 90,
             ],
         ],
 
@@ -275,31 +287,44 @@ return [
                 'connection' => 'redis',
                 'queue' => ['email-inbound'],
                 'processes' => 1,
+                'timeout' => 120,
             ],
             'email-outbound' => [
                 'connection' => 'redis',
                 'queue' => ['email-outbound'],
                 'processes' => 1,
+                'timeout' => 150,
             ],
             'ai' => [
                 'connection' => 'redis',
                 'queue' => ['ai'],
                 'processes' => 1,
+                'timeout' => 330,
+            ],
+            'ai-bulk' => [
+                'connection' => 'redis-long',
+                'queue' => ['ai-bulk'],
+                'processes' => 1,
+                'tries' => 1,
+                'timeout' => 900,
             ],
             'notifications' => [
                 'connection' => 'redis',
                 'queue' => ['notifications'],
                 'processes' => 1,
+                'timeout' => 30,
             ],
             'webhooks' => [
                 'connection' => 'redis',
                 'queue' => ['webhooks'],
                 'processes' => 1,
+                'timeout' => 150,
             ],
             'default' => [
                 'connection' => 'redis',
                 'queue' => ['default'],
                 'processes' => 1,
+                'timeout' => 90,
             ],
         ],
     ],

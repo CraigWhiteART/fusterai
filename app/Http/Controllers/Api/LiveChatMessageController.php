@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Domains\Conversation\Models\Conversation;
 use App\Events\VisitorTyping;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\StoreLiveChatMessageRequest;
@@ -30,21 +29,34 @@ class LiveChatMessageController extends Controller
         ]);
     }
 
+    /**
+     * History for the widget. Returns the chat token too, so a widget session
+     * that started before tokens existed can switch to the token channel.
+     */
     public function messages(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'workspace_id' => 'required|integer|exists:workspaces,id',
             'conversation_id' => 'required|integer',
-            'visitor_id' => 'required|string|max:100',
+            'visitor_id' => 'required_without:chat_token|nullable|string|max:100',
+            'chat_token' => 'nullable|string|max:64',
         ]);
 
-        $threads = $this->service->messages(
-            $validated['visitor_id'],
+        $conversation = $this->service->findForVisitor(
             (int) $validated['conversation_id'],
             (int) $validated['workspace_id'],
+            $validated['chat_token'] ?? null,
+            $validated['visitor_id'] ?? null,
         );
 
-        return response()->json(['threads' => $threads]);
+        if (! $conversation) {
+            return response()->json(['threads' => []]);
+        }
+
+        return response()->json([
+            'threads' => $this->service->messages($conversation),
+            'chat_token' => $conversation->ensureChatToken(),
+        ]);
     }
 
     public function store(StoreLiveChatMessageRequest $request): JsonResponse
@@ -57,21 +69,22 @@ class LiveChatMessageController extends Controller
         $validated = $request->validate([
             'workspace_id' => 'required|integer|exists:workspaces,id',
             'conversation_id' => 'required|integer',
-            'visitor_id' => 'required|string|max:100',
+            'visitor_id' => 'required_without:chat_token|nullable|string|max:100',
+            'chat_token' => 'nullable|string|max:64',
         ]);
 
-        // Verify the conversation belongs to the workspace and this visitor's customer record
-        $email = 'visitor_'.$validated['visitor_id'].'@livechat.local';
-        $conversation = Conversation::where('id', $validated['conversation_id'])
-            ->where('workspace_id', $validated['workspace_id'])
-            ->where('channel_type', 'chat')
-            ->whereHas('customer', fn ($q) => $q->where('email', $email)->where('workspace_id', $validated['workspace_id']))
-            ->first();
+        $conversation = $this->service->findForVisitor(
+            (int) $validated['conversation_id'],
+            (int) $validated['workspace_id'],
+            $validated['chat_token'] ?? null,
+            $validated['visitor_id'] ?? null,
+        );
 
         if (! $conversation) {
             return response()->json(['ok' => false], 403);
         }
 
+        // Agents only: the private conversation channel, never the public one.
         broadcast(new VisitorTyping($conversation->id))->toOthers();
 
         return response()->json(['ok' => true]);

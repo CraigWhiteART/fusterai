@@ -1,0 +1,10 @@
+MIME-Version: 1.0
+Date: Mon, 3 Nov 2025 15:47:51 -0500
+Message-ID: <6908057f2_4a2b9@shopify-mailer-7c9d.mail>
+Subject: New customer message on November 3, 2025 at 3:47 pm
+From: Soul Dial <mailer@shopify.com>
+Reply-To: Aiko Tanaka <aiko.tanaka@example.jp>
+To: support@souldial.test
+Content-Type: text/html; charset=UTF-8
+
+<html><body><p>You received a new message from your online store's contact form.</p><table><tr><td><b>Name:</b></td><td>Aiko Tanaka</td></tr><tr><td><b>Email:</b></td><td>aiko.tanaka@example.jp</td></tr><tr><td><b>Comment:</b></td><td>Is the walnut lamp available with a UK plug?</td></tr></table></body></html>

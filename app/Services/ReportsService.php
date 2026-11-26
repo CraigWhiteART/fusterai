@@ -14,11 +14,14 @@ class ReportsService
     public function stats(int $workspaceId, int $days): array
     {
         $since = now()->subDays($days);
-        $base = Conversation::where('workspace_id', $workspaceId)->where('created_at', '>=', $since);
+        // Imported mail history (backfill) is dated in the past but was never
+        // handled here: it would inflate volume and distort resolution time.
+        $base = Conversation::where('workspace_id', $workspaceId)->where('created_at', '>=', $since)->where('imported', false);
 
         $counts = DB::table('conversations')
             ->where('workspace_id', $workspaceId)
             ->where('created_at', '>=', $since)
+            ->where('imported', false)
             ->selectRaw("
                 COUNT(*) as total,
                 COUNT(CASE WHEN status = 'open'    THEN 1 END) as open,

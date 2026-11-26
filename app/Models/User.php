@@ -16,12 +16,11 @@ use Laravel\Passport\Contracts\OAuthenticatable;
 use Laravel\Passport\HasApiTokens;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
-use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable implements OAuthenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasApiTokens, HasFactory, HasRoles, LogsActivity, Notifiable, SoftDeletes;
+    use HasApiTokens, HasFactory, LogsActivity, Notifiable, SoftDeletes;
 
     public function getActivitylogOptions(): LogOptions
     {

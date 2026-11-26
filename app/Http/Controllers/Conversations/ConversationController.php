@@ -6,6 +6,7 @@ use App\Domains\Conversation\Models\Conversation;
 use App\Domains\Conversation\Models\CustomView;
 use App\Domains\Conversation\Models\Folder;
 use App\Domains\Conversation\Models\Tag;
+use App\Domains\Conversation\Support\ConversationDetailPresenter;
 use App\Domains\Mailbox\Models\Mailbox;
 use App\Enums\ConversationPriority;
 use App\Enums\ConversationStatus;
@@ -24,7 +25,6 @@ use App\Http\Requests\Conversations\UpdateStatusRequest;
 use App\Models\ConversationRead;
 use App\Models\User;
 use App\Services\ConversationService;
-use App\Support\Hooks;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -34,7 +34,10 @@ use Inertia\Response;
 
 class ConversationController extends Controller
 {
-    public function __construct(private ConversationService $service) {}
+    public function __construct(
+        private ConversationService $service,
+        private ConversationDetailPresenter $detail,
+    ) {}
 
     public function index(ConversationIndexRequest $request): Response
     {
@@ -125,6 +128,18 @@ class ConversationController extends Controller
             $query->whereDate('created_at', '<=', $dateTo);
         }
 
+        // The conversation open in the split pane. Opening it marks it read, as the
+        // deep-link page does, so do that before the list computes is_unread.
+        $selected = null;
+        if ($convId = $request->get('conversation')) {
+            $open = Conversation::where('workspace_id', $user->workspace_id)->find($convId);
+
+            if ($open && $user->can('view', $open)) {
+                ConversationRead::markRead($user->id, $open->id);
+                $selected = $this->detail->present($open, $user);
+            }
+        }
+
         $conversations = $query->paginate(30)->withQueryString();
 
         // Attach is_unread flag — a conversation is unread if the user has never
@@ -136,9 +151,10 @@ class ConversationController extends Controller
 
         $conversations->getCollection()->transform(function (Conversation $conv) use ($readMap) {
             $lastRead = $readMap->get($conv->id);
-            $conv->is_unread = $lastRead === null
+            // Imported history is never "new" mail, even though nobody opened it here.
+            $conv->is_unread = ! $conv->imported && ($lastRead === null
                 ? $conv->last_reply_at !== null
-                : ($conv->last_reply_at !== null && $conv->last_reply_at->gt($lastRead));
+                : ($conv->last_reply_at !== null && $conv->last_reply_at->gt($lastRead)));
 
             return $conv;
         });
@@ -149,29 +165,6 @@ class ConversationController extends Controller
         $counts = $this->service->folderCounts($user);
         $agents = User::where('workspace_id', $user->workspace_id)->get(['id', 'name', 'avatar', 'status']);
 
-        $selected = null;
-        $isFollowing = false;
-        $extra = [];
-        if ($convId = $request->get('conversation')) {
-            $selected = Conversation::where('workspace_id', $user->workspace_id)
-                ->where('id', $convId)
-                ->with([
-                    'customer',
-                    'mailbox',
-                    'assignedUser',
-                    'tags',
-                    'folders',
-                    'followers:id,name,avatar',
-                    'threads' => fn ($q) => $q->with(['user', 'customer', 'attachments'])->orderBy('created_at'),
-                ])
-                ->first();
-
-            if ($selected) {
-                $isFollowing = $selected->followers->contains('id', $user->id);
-                $extra = Hooks::applyFilters('conversation.show.extra', [], $selected);
-            }
-        }
-
         return Inertia::render('Conversations/Index', [
             'conversations' => $conversations,
             'mailboxes' => $mailboxes,
@@ -180,7 +173,6 @@ class ConversationController extends Controller
             'counts' => $counts,
             'agents' => $agents,
             'selected' => $selected,
-            'isFollowing' => $isFollowing,
             'filters' => $request->only(['status', 'mailbox', 'assigned', 'tag', 'priority', 'conversation', 'date_from', 'date_to', 'view', 'starred']),
             'activeView' => $activeView ? [
                 'id' => $activeView->id,
@@ -188,7 +180,7 @@ class ConversationController extends Controller
                 'color' => $activeView->color,
                 'filters' => $activeView->filters,
             ] : null,
-            ...$extra,
+            ...($selected['extra'] ?? []),
         ]);
     }
 
@@ -199,21 +191,10 @@ class ConversationController extends Controller
         // Auto-mark as read when the conversation is opened
         ConversationRead::markRead($request->user()->id, $conversation->id);
 
-        $conversation->load([
-            'customer',
-            'mailbox',
-            'assignedUser',
-            'tags',
-            'folders',
-            'followers:id,name,avatar',
-            'threads.user',
-            'threads.customer',
-            'threads.attachments',
-            'aiSuggestions' => fn ($q) => $q->where('type', 'reply')->latest()->limit(1),
-        ]);
+        $detail = $this->detail->present($conversation, $request->user());
 
         $agents = User::where('workspace_id', $request->user()->workspace_id)
-            ->get(['id', 'name', 'avatar']);
+            ->get(['id', 'name', 'avatar', 'status']);
 
         $tags = Tag::where('workspace_id', $request->user()->workspace_id)->get();
 
@@ -223,17 +204,13 @@ class ConversationController extends Controller
         $mailboxes = Mailbox::where('workspace_id', $request->user()->workspace_id)
             ->where('active', true)->get(['id', 'name']);
 
-        $extra = Hooks::applyFilters('conversation.show.extra', [], $conversation);
-
         return Inertia::render('Conversations/Show', [
-            'conversation' => $conversation,
+            'detail' => $detail,
             'agents' => $agents,
             'tags' => $tags,
             'folders' => $folders,
-            'convFolders' => $conversation->folders->pluck('id'),
             'mailboxes' => $mailboxes,
-            'isFollowing' => $conversation->followers->contains('id', $request->user()->id),
-            ...$extra,
+            ...$detail['extra'],
         ]);
     }
 

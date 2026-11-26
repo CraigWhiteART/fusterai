@@ -128,7 +128,6 @@ Modules/SatisfactionSurvey/
 |---|---|---|
 | Action | `conversation.closed` | Dispatches `SendSurveyJob` when a conversation is closed |
 | Filter | `conversation.show.extra` | Appends `survey` data to the conversation show Inertia payload |
-| Filter | `ai.system_prompt` | Tells the AI that a survey will be sent on close |
 
 ---
 
@@ -220,7 +219,7 @@ Query `survey_responses` grouped by `rating` and join with `conversations` to fi
 Register an additional action hook in the service provider:
 
 ```php
-Hook::doAction('survey.responded', $response);
+Hooks::doAction('survey.responded', $response);
 ```
 
 Another module can listen to this and post to Slack, create a follow-up task, etc.

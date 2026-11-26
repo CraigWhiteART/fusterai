@@ -53,17 +53,50 @@ test('visitor typing rejects non-existent conversation', function () {
 
 // ── Agent typing → visitor ────────────────────────────────────────────────────
 
+test('visitor typing accepts the chat token instead of the visitor id', function () {
+    Event::fake([VisitorTyping::class]);
+    $token = $this->conversation->ensureChatToken();
+
+    $this->postJson('/api/livechat/typing', [
+        'workspace_id' => $this->workspace->id,
+        'conversation_id' => $this->conversation->id,
+        'chat_token' => $token,
+    ])->assertOk();
+
+    // A wrong token is refused even with a valid visitor id.
+    $this->postJson('/api/livechat/typing', [
+        'workspace_id' => $this->workspace->id,
+        'conversation_id' => $this->conversation->id,
+        'chat_token' => str_repeat('x', 48),
+        'visitor_id' => 'test-visitor',
+    ])->assertForbidden();
+
+    Event::assertDispatchedTimes(VisitorTyping::class, 1);
+});
+
 test('agent typing event is broadcast for own workspace conversation', function () {
     Event::fake([AgentTyping::class]);
+    $token = $this->conversation->ensureChatToken();
 
     $this->actingAs($this->agent)
         ->postJson("/live-chat/{$this->conversation->id}/typing")
         ->assertOk()->assertJson(['ok' => true]);
 
-    Event::assertDispatched(AgentTyping::class, function ($e) {
+    Event::assertDispatched(AgentTyping::class, function ($e) use ($token) {
         return $e->conversationId === $this->conversation->id
-            && $e->agentName === $this->agent->name;
+            && $e->agentName === $this->agent->name
+            && $e->chatChannel === "livechat.{$token}";
     });
+});
+
+test('agent typing is not broadcast when the visitor has no chat token', function () {
+    Event::fake([AgentTyping::class]);
+
+    $this->actingAs($this->agent)
+        ->postJson("/live-chat/{$this->conversation->id}/typing")
+        ->assertOk();
+
+    Event::assertNotDispatched(AgentTyping::class);
 });
 
 test('agent typing is forbidden for conversation in another workspace', function () {
@@ -89,7 +122,7 @@ test('agent typing requires authentication', function () {
 
 // ── Event broadcast structure ─────────────────────────────────────────────────
 
-test('VisitorTyping broadcasts on correct public channel', function () {
+test('VisitorTyping goes to agents on the private conversation channel only', function () {
     $event = new VisitorTyping(42);
 
     expect($event->broadcastAs())->toBe('visitor.typing');
@@ -97,16 +130,20 @@ test('VisitorTyping broadcasts on correct public channel', function () {
 
     $channels = $event->broadcastOn();
     expect($channels)->toHaveCount(1);
-    expect($channels[0]->name)->toBe('livechat.42');
+    expect($channels[0]->name)->toBe('private-conversation.42');
 });
 
-test('AgentTyping broadcasts on correct public channel', function () {
-    $event = new AgentTyping(42, 'Alice');
+test('AgentTyping broadcasts on the visitor token channel, never livechat.{id}', function () {
+    $channel = 'livechat.'.str_repeat('a', 48);
+    $event = new AgentTyping(42, 'Alice', $channel);
 
     expect($event->broadcastAs())->toBe('agent.typing');
     expect($event->broadcastWith())->toBe(['conversation_id' => 42, 'agent_name' => 'Alice']);
 
     $channels = $event->broadcastOn();
     expect($channels)->toHaveCount(1);
-    expect($channels[0]->name)->toBe('livechat.42');
+    expect($channels[0]->name)->toBe($channel);
+
+    $none = new AgentTyping(42, 'Alice');
+    expect($none->broadcastOn())->toBe([])->and($none->broadcastWhen())->toBeFalse();
 });

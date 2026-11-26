@@ -1,0 +1,11 @@
+[
+    {"file": "01-customer-enquiry.eml", "uid": 101, "gm_msgid": "1847650000000000101", "gm_thrid": "1847650000000000101", "labels": ["\\Inbox"], "internal_date": "2025-11-03T09:15:02Z", "folder": "INBOX"},
+    {"file": "02-agent-reply-from-gmail.eml", "uid": 102, "gm_msgid": "1847650000000000102", "gm_thrid": "1847650000000000101", "labels": ["\\Sent"], "internal_date": "2025-11-03T10:42:18Z", "folder": "Sent"},
+    {"file": "04-shopify-contact-form.eml", "uid": 103, "gm_msgid": "1847650000000000103", "gm_thrid": "1847650000000000103", "labels": ["\\Inbox", "Contact form"], "internal_date": "2025-11-03T16:02:10Z", "folder": "INBOX"},
+    {"file": "04b-shopify-contact-form-other-customer.eml", "uid": 104, "gm_msgid": "1847650000000000104", "gm_thrid": "1847650000000000103", "labels": ["\\Inbox", "Contact form"], "internal_date": "2025-11-03T20:47:52Z", "folder": "INBOX"},
+    {"file": "05-out-of-office.eml", "uid": 105, "gm_msgid": "1847650000000000105", "gm_thrid": "1847650000000000105", "labels": ["\\Inbox"], "internal_date": "2025-11-04T07:00:04Z", "folder": "INBOX"},
+    {"file": "03-customer-followup-top-posted.eml", "uid": 106, "gm_msgid": "1847650000000000106", "gm_thrid": "1847650000000000101", "labels": ["\\Inbox", "\\Important"], "internal_date": "2025-11-04T18:03:42Z", "folder": "INBOX"},
+    {"file": "07-inline-image-and-attachment.eml", "uid": 107, "gm_msgid": "1847650000000000107", "gm_thrid": "1847650000000000101", "labels": ["\\Inbox", "Kunden/Rückfragen"], "internal_date": "2025-11-05T09:12:45Z", "folder": "INBOX"},
+    {"file": "06-newsletter.eml", "uid": 108, "gm_msgid": "1847650000000000108", "gm_thrid": "1847650000000000108", "labels": ["Newsletters"], "internal_date": "2025-11-05T14:00:01Z", "folder": "INBOX"},
+    {"file": "08-plain-text-quoted.eml", "uid": 109, "gm_msgid": "18000000000000000109", "gm_thrid": "18000000000000000109", "labels": ["\\Inbox"], "internal_date": "2025-11-06T20:30:13Z", "folder": "INBOX"}
+]

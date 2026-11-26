@@ -94,7 +94,10 @@ Customer emails, support threads, attachments, AI-generated summaries, knowledge
 - **Attachments** — local disk or S3-compatible object storage
 
 ### AI Features
-- **Reply suggestions (RAG)** — Claude searches your knowledge base and drafts a context-aware reply for every new ticket
+- **Trainable AI support agent** — learns your voice and policies from your real email history, drafts replies with sources, and hands over when unsure ([go-live checklist](docs/agent-go-live.md))
+- **Feedback loop** — say "don't say that, be more like this" under a draft; the change is staged as a proposal with a diff, a preview and a regression test before it goes live
+- **Simulation, QA and reports** — replay past tickets, review closed conversations, track automation and edit rates
+- **Shadow mode, staged auto-send and Shopify actions** — all off by default, enabled per playbook with rollout percentages, caps, an undo window, circuit breakers and a kill switch
 - **Auto-categorization** — tags and priority set automatically when a ticket arrives
 - **Summarization** — one-click conversation summaries
 - **Knowledge base** — import docs, FAQs, and policies; AI searches via pgvector embeddings
@@ -367,7 +370,8 @@ AWS_USE_PATH_STYLE_ENDPOINT=true
 |---|---|---|---|
 | `email-inbound` | email-inbound | 3–6 | IMAP fetch + inbound email processing |
 | `email-outbound` | email-outbound | 5–10 | SMTP send, auto-replies, retry on failure |
-| `ai` | ai | 4–8 | Reply suggestions, categorization, KB indexing |
+| `ai` | ai | 4–8 | Agent drafts, categorization, KB indexing, QA, manager chat |
+| `ai-bulk` | ai-bulk (connection `redis-long`) | 1 | History backfill, mining, simulations, QA backfill (long jobs, 900 s timeout) |
 | `notifications` | notifications | 2–4 | In-app + email notifications |
 | `webhooks` | webhooks | 3–6 | Inbound webhook processing |
 | `default` | default | 2–4 | General background jobs |
@@ -379,8 +383,8 @@ AWS_USE_PATH_STYLE_ENDPOINT=true
 | `ConversationUpdated` | Status / assign change | Refreshes list and conversation view |
 | `NewThreadReceived` | New message arrives | Appends message in real-time |
 | `AiSuggestionReady` | AI finishes generating | Populates AI assist panel |
-| `AgentTyping` | Agent opens reply box | Shows "X is viewing" collision indicator |
-| `VisitorTyping` | Widget visitor types | Shows typing indicator in agent console |
+| `AgentTyping` | Agent types in a live chat | Shows "agent is typing" in the visitor's widget (`livechat.{chat_token}`) |
+| `VisitorTyping` | Widget visitor types | Shows typing indicator in agent console (private `conversation.{id}`) |
 
 ### Database Tables
 
@@ -405,13 +409,33 @@ activity_logs       — Full audit trail
 
 ## AI Features
 
-### Reply Suggestions (RAG Pipeline)
+### The AI agent
 
-1. Customer sends a message → `GenerateReplySuggestionJob` dispatched
-2. Semantic search on your knowledge base (pgvector cosine similarity)
-3. Top-k relevant document chunks injected into Claude's system prompt
-4. Claude generates a context-aware draft reply
-5. Response streamed to the AI Assist panel via Reverb WebSocket
+Every new customer message goes through one code-controlled pipeline
+(`app/Domains/Agent/Pipeline`): preflight (kill switch, auto-reply guard,
+idempotency) → full transcript → triage (Haiku: language, sentiment, risk,
+playbook) → Shopify / tracking evidence → writer (Opus, a bounded tool loop:
+`search_knowledge`, `lookup_order`, `lookup_tracking`, `propose_action`,
+`handover`) → fail-closed validation (deterministic checks, then a validator
+on a different model) → policy gate (draft, auto-send or handover) → one
+`agent_runs` row with the full trace, tokens and cost. Customer mail and tool
+results are passed as data, never as instructions.
+
+What it knows comes from human-approved, versioned instructions: voice,
+playbooks, knowledge and examples (Agent → Voice / Playbooks / Knowledge),
+seeded by mining your sent history and changed through proposals.
+
+| Doc | What it covers |
+|---|---|
+| [agent-go-live.md](docs/agent-go-live.md) | **Start here**: deploy → live checklist, and what has never run against a live service |
+| [agent-api.md](docs/agent-api.md) | Pipeline, runs, instruction screens, HTTP API |
+| [mail-sync.md](docs/mail-sync.md) | Gmail ledger sync and history import |
+| [agent-mining.md](docs/agent-mining.md) | Learning playbooks, knowledge and voice from history |
+| [agent-proposals.md](docs/agent-proposals.md) | Feedback loop, proposals, test cases, simulation |
+| [agent-manager.md](docs/agent-manager.md) | Manager chat |
+| [agent-qa.md](docs/agent-qa.md) | QA reviews and the performance report |
+| [agent-autosend.md](docs/agent-autosend.md) | Shadow mode, auto-send, rollout, breakers |
+| [agent-actions.md](docs/agent-actions.md) | Shopify actions, approvals, policies |
 
 ### MCP Server
 
@@ -469,13 +493,15 @@ Embed on any website with two lines of HTML:
 <script src="https://your-fusterai.com/livechat/widget.js" async></script>
 ```
 
+The widget has no WebSocket auth, so agent replies are broadcast on a public channel named after a random per-conversation token: `POST /api/livechat/message` returns `{conversation_id, chat_token}`, the widget keeps the token in `localStorage` (`fusterai_chat_token`), subscribes to `livechat.{chat_token}` and sends `chat_token` on `GET /api/livechat/messages` and `POST /api/livechat/typing`. Nothing is ever broadcast on `livechat.{conversation_id}`. Agents receive chat messages and visitor typing on the private `conversation.{id}` channel.
+
 ### WhatsApp
 
 Connect a WhatsApp Business account via the Meta Cloud API:
 
 1. Create a Meta Business App and enable WhatsApp
 2. In FusterAI, create a mailbox with channel type **WhatsApp**
-3. Save your `Phone Number ID`, `Access Token`, and `App Secret` in the mailbox settings
+3. Save your `Phone Number ID`, `Access Token`, and `App Secret` on the mailbox's WhatsApp setup page (the token and secret are encrypted and never sent back to the browser; leave them blank to keep the saved values)
 4. Register the webhook URL shown in settings with Meta (verify token = mailbox webhook token)
 
 Inbound messages are matched to existing open conversations or create a new one. Outbound replies route through `WhatsAppDriver` → Meta Graph API v17.0.
@@ -517,9 +543,11 @@ Hooks::addAction('conversation.created', function (Conversation $conv) {
     // send Slack notification, call external API, etc.
 });
 
-// Modify AI system prompt per-conversation
-Hooks::addFilter('ai.system_prompt', function (string $prompt, Conversation $conv) {
-    return $prompt . "\n\nAlways respond in the customer's language.";
+// Add data to the conversation page
+Hooks::addFilter('conversation.show.extra', function (array $extra, Conversation $conv) {
+    $extra['myModule'] = ['score' => 42];
+
+    return $extra;
 });
 ```
 
@@ -578,8 +606,8 @@ and mirrors `.github/workflows/ci.yml` so a green run here means a green run in 
 
 ```bash
 composer test:docker                                              # Run all tests
-docker compose -f docker-compose.test.yml run --rm test --filter=CommerceAssist
-docker compose -f docker-compose.test.yml run --rm test --parallel
+docker compose -f docker-compose.test.yml run --rm test --filter=AutoSend
+docker compose -f docker-compose.test.yml run --rm test --parallel --processes=8
 docker compose -f docker-compose.test.yml down -v                 # Tear down
 ```
 
@@ -651,6 +679,9 @@ php artisan scout:import "App\Domains\Conversation\Models\Conversation"
 - [ ] Secure random `REVERB_APP_KEY` and `REVERB_APP_SECRET`
 - [ ] Reverse proxy (Nginx or Caddy) in front of app + Reverb
 - [ ] SSL/TLS certificates (Let's Encrypt / Certbot)
+- [ ] Horizon running with all supervisors incl. `ai-bulk` (`redis-long`), and the scheduler (`schedule:work` or cron)
+- [ ] `REDIS_QUEUE_RETRY_AFTER` ≥ 360 and `REDIS_LONG_QUEUE_RETRY_AFTER` ≥ 960 (above the supervisor timeouts)
+- [ ] AI agent: follow [docs/agent-go-live.md](docs/agent-go-live.md) before switching it on
 
 ### Nginx — WebSocket Proxy
 
@@ -763,6 +794,7 @@ Detailed guides in the [`docs/`](docs/) folder:
 | [Configuration](docs/configuration.md) | All environment variables explained |
 | [AI Setup](docs/ai-setup.md) | Anthropic API, knowledge base RAG, MCP server |
 | [Module Development](docs/modules.md) | Build custom plugins with the hook/filter system |
+| [AI agent: go-live](docs/agent-go-live.md) | Ordered checklist from deployed to live, with links to every agent doc |
 
 ---
 
@@ -785,10 +817,12 @@ Detailed guides in the [`docs/`](docs/) folder:
   ```
 - Switch to `SCOUT_DRIVER=database` in `.env` for zero-setup search (slower on large datasets).
 
-### AI features not appearing
-- Add `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) to `.env`.
-- AI features can also be configured via **Settings → AI Config** in the admin panel.
-- Horizon must be running (AI jobs run in the `ai` queue).
+### AI drafts not appearing
+- Configure the key in **Settings → AI Config** (or `ANTHROPIC_API_KEY` in `.env` as a fallback).
+- The agent only drafts on its own in mode **draft** or **live** (Agent → Settings); in **off** and **shadow** use "AI Suggest" in the conversation. The kill switch stops everything.
+- Horizon must be running (`ai` queue; history import, mining and simulations use `ai-bulk`).
+- A handover is a decision, not an error: the note in the conversation and the run (Agent panel) say why.
+- AI jobs running twice: `REDIS_QUEUE_RETRY_AFTER` is below the `ai` supervisor timeout (330 s). Use the default 360.
 
 ### File uploads not working / attachments broken
 - Run `php artisan storage:link` to create the public storage symlink.

@@ -82,6 +82,9 @@
     var LS_KEY_NAME  = 'fusterai_visitor_name';
     var LS_KEY_EMAIL = 'fusterai_visitor_email';
     var LS_KEY_CONV  = 'fusterai_conversation_id';
+    // Secret for this chat: agent replies arrive on the public channel
+    // `livechat.{chat_token}`; also proves ownership on history/typing calls.
+    var LS_KEY_TOKEN = 'fusterai_chat_token';
 
     function generateId() {
         if (window.crypto && window.crypto.randomUUID) {
@@ -102,6 +105,7 @@
     var visitorName  = localStorage.getItem(LS_KEY_NAME)  || 'Visitor';
     var visitorEmail = localStorage.getItem(LS_KEY_EMAIL) || null;
     var conversationId = localStorage.getItem(LS_KEY_CONV) || null;
+    var chatToken      = localStorage.getItem(LS_KEY_TOKEN) || null;
 
     localStorage.setItem(LS_KEY_ID, visitorId);
 
@@ -228,8 +232,9 @@
         panel.classList.remove('hidden');
         clearUnread();
         if (conversationId && !livechatChannel) {
+            // History also returns the chat token (older sessions may not have one yet).
             loadHistory(conversationId);
-            subscribeToConversation(conversationId);
+            subscribeToConversation();
         }
         if (!localStorage.getItem(LS_KEY_NAME) || !localStorage.getItem(LS_KEY_EMAIL)) {
             showNamePrompt();
@@ -387,13 +392,37 @@
         xhr.setRequestHeader('Content-Type', 'application/json');
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-        xhr.send(JSON.stringify({ conversation_id: conversationId }));
+        xhr.send(JSON.stringify({
+            workspace_id:    workspaceId,
+            conversation_id: conversationId,
+            visitor_id:      visitorId,
+            chat_token:      chatToken,
+        }));
     }
 
     // -- Pusher / Reverb subscription -----------------------------------------
 
-    var echoInstance = null;
+    var pusherClient = null;
     var livechatChannel = null;
+    var livechatChannelName = null;
+
+    /** Remember a (new) conversation + token; re-subscribe when the token changed. */
+    function useChat(convId, token) {
+        if (convId) {
+            conversationId = convId;
+            localStorage.setItem(LS_KEY_CONV, convId);
+        }
+        if (token && token !== chatToken) {
+            chatToken = token;
+            localStorage.setItem(LS_KEY_TOKEN, token);
+            if (pusherClient && livechatChannelName) {
+                pusherClient.unsubscribe(livechatChannelName);
+            }
+            livechatChannel = null;
+            livechatChannelName = null;
+        }
+        subscribeToConversation();
+    }
 
     function loadPusherJs(callback) {
         if (window.Pusher) {
@@ -406,13 +435,16 @@
         document.head.appendChild(s);
     }
 
-    function subscribeToConversation(convId) {
-        if (livechatChannel) {
-            return; // already subscribed
+    function subscribeToConversation() {
+        if (livechatChannel || !chatToken) {
+            return; // already subscribed, or no token yet (it comes with the first reply)
         }
+        var channelName = 'livechat.' + chatToken;
+        livechatChannelName = channelName;
 
         loadPusherJs(function () {
-            var pusher = new window.Pusher(wsKey, {
+            if (livechatChannelName !== channelName) return; // token changed meanwhile
+            var pusher = pusherClient || new window.Pusher(wsKey, {
                 wsHost:            wsHost,
                 wsPort:            wsPort,
                 wssPort:           wsPort,
@@ -422,7 +454,8 @@
                 cluster:           'mt1', // required by Pusher.js but ignored by Reverb
             });
 
-            livechatChannel = pusher.subscribe('livechat.' + convId);
+            pusherClient = pusher;
+            livechatChannel = pusher.subscribe(channelName);
 
             livechatChannel.bind('thread.created', function (data) {
                 if (!data || !data.thread) return;
@@ -457,13 +490,20 @@
 
     function loadHistory(convId) {
         var xhr = new XMLHttpRequest();
-        xhr.open('GET', apiBase + '/api/livechat/messages?conversation_id=' + convId + '&visitor_id=' + encodeURIComponent(visitorId), true);
+        var query = 'workspace_id=' + encodeURIComponent(workspaceId)
+            + '&conversation_id=' + encodeURIComponent(convId)
+            + '&visitor_id=' + encodeURIComponent(visitorId)
+            + (chatToken ? '&chat_token=' + encodeURIComponent(chatToken) : '');
+        xhr.open('GET', apiBase + '/api/livechat/messages?' + query, true);
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
         xhr.onload = function () {
             if (xhr.status >= 200 && xhr.status < 300) {
                 try {
                     var resp = JSON.parse(xhr.responseText);
+                    if (resp.chat_token) {
+                        useChat(null, resp.chat_token);
+                    }
                     if (resp.threads && resp.threads.length) {
                         messagesEl.innerHTML = '';
                         resp.threads.forEach(function (thread) {
@@ -518,10 +558,8 @@
             if (xhr.status >= 200 && xhr.status < 300) {
                 try {
                     var resp = JSON.parse(xhr.responseText);
-                    if (resp.conversation_id && !conversationId) {
-                        conversationId = resp.conversation_id;
-                        localStorage.setItem(LS_KEY_CONV, conversationId);
-                        subscribeToConversation(conversationId);
+                    if (resp.conversation_id) {
+                        useChat(String(resp.conversation_id), resp.chat_token || null);
                     }
                 } catch (e) {}
             } else {

@@ -16,6 +16,7 @@ class AiSuggestion extends Model
         'prompt_tokens',
         'completion_tokens',
         'accepted',
+        'agent_run_id',
     ];
 
     protected $casts = [

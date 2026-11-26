@@ -64,11 +64,27 @@ return [
             'after_commit' => false,
         ],
 
+        // retry_after must stay above the largest Horizon supervisor timeout
+        // on this connection (the "ai" supervisor, 330s). Otherwise a job that
+        // is still running gets re-reserved by another worker and runs twice.
         'redis' => [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 360),
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
+        // Same Redis server, longer reservation window, for long batch work on
+        // the "ai-bulk" queue (Horizon supervisor timeout 900s). Kept separate
+        // so a crashed short job on "redis" is still retried within minutes.
+        // Dispatch with ->onConnection('redis-long')->onQueue('ai-bulk').
+        'redis-long' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => 'ai-bulk',
+            'retry_after' => (int) env('REDIS_LONG_QUEUE_RETRY_AFTER', 960),
             'block_for' => null,
             'after_commit' => false,
         ],

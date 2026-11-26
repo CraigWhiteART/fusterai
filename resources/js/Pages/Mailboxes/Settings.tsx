@@ -73,10 +73,19 @@ interface OfficeHoursConfig {
     schedule: Record<string, DaySchedule>;
 }
 
+/** Server sends the config without its password; has_password says whether one is stored. */
+interface SafeServerConfig {
+    host?: string;
+    port?: string;
+    encryption?: string;
+    username?: string;
+    has_password?: boolean;
+}
+
 interface Props {
     mailbox: Mailbox & {
-        imap_config?: Record<string, string>;
-        smtp_config?: Record<string, string>;
+        imap_config?: SafeServerConfig | null;
+        smtp_config?: SafeServerConfig | null;
         auto_reply_config?: {
             enabled: boolean;
             subject?: string;
@@ -186,21 +195,24 @@ export default function MailboxSettings({ mailbox }: Props) {
         email: mailbox.email,
         signature: mailbox.signature ?? '',
         active: mailbox.active,
+        // One address per line; the server splits, trims and validates.
+        aliases: (mailbox.aliases ?? []).join('\n'),
 
         imap_config: {
             host: mailbox.imap_config?.host ?? '',
-            port: mailbox.imap_config?.port ?? '993',
+            port: String(mailbox.imap_config?.port ?? '993'),
             encryption: mailbox.imap_config?.encryption ?? 'ssl',
             username: mailbox.imap_config?.username ?? '',
-            password: mailbox.imap_config?.password ?? '',
+            // Never pre-filled; blank on save keeps the stored password.
+            password: '',
         },
 
         smtp_config: {
             host: mailbox.smtp_config?.host ?? '',
-            port: mailbox.smtp_config?.port ?? '587',
+            port: String(mailbox.smtp_config?.port ?? '587'),
             encryption: mailbox.smtp_config?.encryption ?? 'tls',
             username: mailbox.smtp_config?.username ?? '',
-            password: mailbox.smtp_config?.password ?? '',
+            password: '',
         },
 
         auto_reply_config: {
@@ -223,6 +235,10 @@ export default function MailboxSettings({ mailbox }: Props) {
             },
         },
     });
+
+    const aliasError = Object.entries(errors as Record<string, string | undefined>).find(
+        ([key]) => key === 'aliases' || key.startsWith('aliases.'),
+    )?.[1];
 
     function submit(e: React.FormEvent) {
         e.preventDefault();
@@ -300,6 +316,24 @@ export default function MailboxSettings({ mailbox }: Props) {
                                 />
                             </Field>
 
+                            <Field
+                                label="Other addresses you send from"
+                                htmlFor="aliases"
+                                error={aliasError}
+                                hint={
+                                    'One per line. Mail from these addresses (e.g. Gmail "Send mail as" aliases) counts as a reply from your team, never as a customer.'
+                                }
+                            >
+                                <textarea
+                                    id="aliases"
+                                    rows={2}
+                                    className="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                                    value={data.aliases}
+                                    onChange={(e) => setData('aliases', e.target.value)}
+                                    placeholder={'orders@example.com\nhello@example.com'}
+                                />
+                            </Field>
+
                             <Separator />
 
                             <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3">
@@ -369,12 +403,17 @@ export default function MailboxSettings({ mailbox }: Props) {
                                 <Field
                                     label="Password / App password"
                                     htmlFor="imap-password"
-                                    hint="Use an app-specific password for Gmail or Outlook."
+                                    hint={
+                                        mailbox.imap_config?.has_password
+                                            ? 'A password is saved. Leave blank to keep it.'
+                                            : 'Use an app-specific password for Gmail or Outlook.'
+                                    }
                                 >
                                     <PasswordInput
                                         id="imap-password"
                                         value={data.imap_config.password}
                                         onChange={(v) => setData('imap_config', { ...data.imap_config, password: v })}
+                                        placeholder={mailbox.imap_config?.has_password ? 'Leave blank to keep current' : undefined}
                                     />
                                 </Field>
                             </div>
@@ -417,8 +456,8 @@ export default function MailboxSettings({ mailbox }: Props) {
                                         value={data.smtp_config.encryption}
                                         onChange={(v) => setData('smtp_config', { ...data.smtp_config, encryption: v })}
                                     >
-                                        <option value="tls">TLS (recommended)</option>
-                                        <option value="ssl">SSL</option>
+                                        <option value="tls">STARTTLS (port 587, recommended)</option>
+                                        <option value="ssl">SSL/TLS (port 465)</option>
                                         <option value="none">None</option>
                                     </NativeSelect>
                                 </Field>
@@ -435,11 +474,16 @@ export default function MailboxSettings({ mailbox }: Props) {
                                         placeholder="you@gmail.com"
                                     />
                                 </Field>
-                                <Field label="Password" htmlFor="smtp-password">
+                                <Field
+                                    label="Password"
+                                    htmlFor="smtp-password"
+                                    hint={mailbox.smtp_config?.has_password ? 'A password is saved. Leave blank to keep it.' : undefined}
+                                >
                                     <PasswordInput
                                         id="smtp-password"
                                         value={data.smtp_config.password}
                                         onChange={(v) => setData('smtp_config', { ...data.smtp_config, password: v })}
+                                        placeholder={mailbox.smtp_config?.has_password ? 'Leave blank to keep current' : undefined}
                                     />
                                 </Field>
                             </div>

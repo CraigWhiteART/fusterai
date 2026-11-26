@@ -74,7 +74,8 @@ export default function LiveChatIndex({ conversations: initialConversations }: P
         return () => ch?.stopListening('.conversation.updated');
     }, [auth.user?.workspace_id]);
 
-    // ── Real-time: per-conversation livechat channel for new threads + typing ──
+    // ── Real-time: the private conversation channel for new threads + visitor typing ──
+    // (the public livechat.{token} channel is for the visitor's widget only)
 
     useEffect(() => {
         if (!selectedId) return;
@@ -82,8 +83,8 @@ export default function LiveChatIndex({ conversations: initialConversations }: P
         setVisitorTyping(false);
         if (visitorTypingTimer.current) clearTimeout(visitorTypingTimer.current);
 
-        const channelName = `livechat.${selectedId}`;
-        const ch = window.Echo?.channel(channelName);
+        const channelName = `conversation.${selectedId}`;
+        const ch = window.Echo?.private(channelName);
 
         ch?.listen('.thread.created', (event: { thread: Thread }) => {
             setThreads((prev) => {

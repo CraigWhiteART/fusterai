@@ -24,10 +24,14 @@ class NewThreadReceived implements ShouldBroadcast
             new PrivateChannel("conversation.{$this->thread->conversation_id}"),
         ];
 
-        // Also broadcast on the public livechat channel so visitor widgets can receive
-        // agent replies without needing WebSocket authentication.
+        // Chat replies also go to the visitor's widget, which has no WebSocket
+        // auth: a public channel named after the conversation's random chat
+        // token (never its sequential id), so only that visitor can listen.
         if ($this->thread->source === 'chat') {
-            $channels[] = new Channel("livechat.{$this->thread->conversation_id}");
+            $chatChannel = $this->thread->conversation?->chatChannelName();
+            if ($chatChannel !== null) {
+                $channels[] = new Channel($chatChannel);
+            }
         }
 
         return $channels;

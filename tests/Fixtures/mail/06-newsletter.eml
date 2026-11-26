@@ -1,0 +1,26 @@
+MIME-Version: 1.0
+Date: Wed, 5 Nov 2025 14:00:00 +0000
+Message-ID: <20251105140000.8f3a.news@mail.brandsupply.example>
+Subject: =?UTF-8?Q?This_week_at_Brand_Supply_=E2=80=94_20=25_off_brass?=
+From: Brand Supply <news@brandsupply.example>
+To: support@souldial.test
+List-Id: Brand Supply Newsletter <newsletter.brandsupply.example>
+List-Unsubscribe: <https://brandsupply.example/u/abc123>, <mailto:unsubscribe@brandsupply.example?subject=abc123>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+Precedence: bulk
+Feedback-ID: 1234:newsletter:brandsupply
+Content-Type: multipart/alternative; boundary="b1_nl"
+
+--b1_nl
+Content-Type: text/plain; charset=utf-8
+
+This week: 20% off all brass fittings. Shop now: https://brandsupply.example/brass
+
+Unsubscribe: https://brandsupply.example/u/abc123
+
+--b1_nl
+Content-Type: text/html; charset=utf-8
+
+<html><head><style>body{background:#fafafa}.hero{font-size:28px}</style><script>window.track&&track('open')</script></head><body><div class="hero">This week: 20% off all brass fittings.</div><p><a href="https://brandsupply.example/brass">Shop now</a></p><p style="font-size:11px">Unsubscribe: <a href="https://brandsupply.example/u/abc123">here</a></p></body></html>
+
+--b1_nl--

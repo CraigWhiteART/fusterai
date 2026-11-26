@@ -11,12 +11,12 @@ interface Props {
         id: number;
         name: string;
         webhook_token: string;
-        channel?: {
-            config: {
-                phone_number_id?: string;
-                access_token?: string;
-            };
-        };
+        // Secrets are never sent to the browser; has_* says whether one is stored.
+        channel: {
+            phone_number_id: string;
+            has_access_token: boolean;
+            has_app_secret: boolean;
+        } | null;
     };
     webhookUrl: string;
 }
@@ -73,9 +73,13 @@ function PasswordInput({
 }
 
 export default function WhatsAppSetup({ mailbox, webhookUrl }: Props) {
+    const hasAccessToken = mailbox.channel?.has_access_token ?? false;
+    const hasAppSecret = mailbox.channel?.has_app_secret ?? false;
     const { data, setData, post, processing, errors } = useForm({
-        phone_number_id: mailbox.channel?.config?.phone_number_id ?? '',
-        access_token: mailbox.channel?.config?.access_token ?? '',
+        phone_number_id: mailbox.channel?.phone_number_id ?? '',
+        // Blank = keep the stored value.
+        access_token: '',
+        app_secret: '',
     });
 
     function submit(e: React.FormEvent) {
@@ -162,10 +166,27 @@ export default function WhatsAppSetup({ mailbox, webhookUrl }: Props) {
                                         id="access-token"
                                         value={data.access_token}
                                         onChange={(v) => setData('access_token', v)}
-                                        placeholder="EAAxxxxxxxx..."
+                                        placeholder={hasAccessToken ? 'Saved. Leave blank to keep it' : 'EAAxxxxxxxx...'}
                                     />
                                     {errors.access_token && <p className="text-xs text-destructive">{errors.access_token}</p>}
-                                    <p className="text-xs text-muted-foreground">Credentials are encrypted before storage.</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <label htmlFor="app-secret" className="text-sm font-medium">
+                                        App Secret
+                                    </label>
+                                    <PasswordInput
+                                        id="app-secret"
+                                        value={data.app_secret}
+                                        onChange={(v) => setData('app_secret', v)}
+                                        placeholder={
+                                            hasAppSecret ? 'Saved. Leave blank to keep it' : 'App secret from App settings → Basic'
+                                        }
+                                    />
+                                    {errors.app_secret && <p className="text-xs text-destructive">{errors.app_secret}</p>}
+                                    <p className="text-xs text-muted-foreground">
+                                        Used to verify that webhook calls come from Meta. Credentials are encrypted before storage and are
+                                        never shown again.
+                                    </p>
                                 </div>
                                 <div className="flex justify-end">
                                     <Button type="submit" disabled={processing}>

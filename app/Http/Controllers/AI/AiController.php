@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\AI;
 
+use App\Domains\Agent\Models\AgentSetting;
 use App\Domains\AI\Jobs\GenerateReplySuggestionJob;
 use App\Domains\AI\Jobs\SummarizeConversationJob;
 use App\Domains\Conversation\Models\AiSuggestion;
@@ -16,7 +17,13 @@ class AiController extends Controller
     {
         $this->authorize('update', $conversation);
 
-        GenerateReplySuggestionJob::dispatch($conversation)->onQueue('ai');
+        // A person asked: a one-off agent draft even when the agent is off or
+        // in shadow (GenerateReplySuggestionJob). Kill switch = nothing runs.
+        if (AgentSetting::forWorkspace((int) $conversation->workspace_id)->kill_switch) {
+            return response()->json(['message' => 'The AI agent kill switch is on, so it cannot draft. Turn it off in Agent settings.'], 409);
+        }
+
+        GenerateReplySuggestionJob::dispatch($conversation, manual: true)->onQueue('ai');
 
         return response()->json(['status' => 'queued']);
     }

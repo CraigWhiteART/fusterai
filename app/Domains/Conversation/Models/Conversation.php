@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Str;
 use Laravel\Scout\Searchable;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
@@ -65,7 +66,16 @@ class Conversation extends Model
         'last_reply_at',
         'snoozed_until',
         'starred',
+        'gm_thrid',
+        'imported',
+        'handover_reason',
     ];
+
+    /**
+     * The live-chat channel secret: only the visitor who started the chat
+     * receives it (see chatChannelName()).
+     */
+    protected $hidden = ['chat_token'];
 
     protected $casts = [
         'status' => ConversationStatus::class,
@@ -75,6 +85,8 @@ class Conversation extends Model
         'last_reply_at' => 'datetime',
         'snoozed_until' => 'datetime',
         'starred' => 'boolean',
+        // gm_thrid is numeric(20,0) and stays a decimal string: never cast it to int.
+        'imported' => 'boolean',
     ];
 
     // ── Scout ────────────────────────────────────────────────────
@@ -96,6 +108,29 @@ class Conversation extends Model
     public function searchableAs(): string
     {
         return 'conversations';
+    }
+
+    // ── Live chat ────────────────────────────────────────────────
+
+    /**
+     * The visitor's chat token, created on first use. Agent replies and
+     * agent-typing events are broadcast on the public `livechat.{token}`
+     * channel, so the token (not the sequential id) is what keeps one
+     * visitor from listening to another visitor's chat.
+     */
+    public function ensureChatToken(): string
+    {
+        if (! filled($this->chat_token)) {
+            $this->forceFill(['chat_token' => Str::random(48)])->saveQuietly();
+        }
+
+        return (string) $this->chat_token;
+    }
+
+    /** Public widget channel name, or null when no token was ever issued. */
+    public function chatChannelName(): ?string
+    {
+        return filled($this->chat_token) ? 'livechat.'.$this->chat_token : null;
     }
 
     // ── Relations ────────────────────────────────────────────────

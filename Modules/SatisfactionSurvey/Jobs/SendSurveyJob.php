@@ -33,6 +33,12 @@ class SendSurveyJob implements ShouldQueue
             return;
         }
 
+        // Never survey imported mail history (e.g. an old imported conversation
+        // reopened and closed again by hand).
+        if ($this->conversation->imported) {
+            return;
+        }
+
         $customer = $this->conversation->customer;
 
         // Only send if conversation has a customer with an email address

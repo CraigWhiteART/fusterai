@@ -30,7 +30,7 @@ Broadcast::channel('conversation.{conversationId}.presence', function ($user, $c
     return ['id' => $user->id, 'name' => $user->name, 'avatar' => $user->avatar];
 });
 
-// Live chat channel — agents subscribe to visitor conversations
-Broadcast::channel('livechat.{conversationId}', function ($user, $conversationId) {
-    return $user->workspace_id === Conversation::find($conversationId)?->workspace_id;
-});
+// Live chat: the visitor widget listens on the PUBLIC channel
+// `livechat.{chat_token}` (Conversation::chatChannelName()). Public channels
+// have no auth callback; the random per-conversation token is the secret.
+// Agents get chat events (incl. visitor.typing) on `conversation.{id}` above.

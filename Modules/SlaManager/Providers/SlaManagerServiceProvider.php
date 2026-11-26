@@ -87,17 +87,6 @@ class SlaManagerServiceProvider extends ServiceProvider
             return $data;
         });
 
-        // ── Add SLA breach context to AI system prompt ────────────────────────
-        Hooks::addFilter('ai.system_prompt', function (string $prompt, Conversation $conversation) {
-            $status = SlaStatus::where('conversation_id', $conversation->id)->first();
-
-            if ($status && $status->resolution_status === 'breached') {
-                $prompt .= "\n\nNote: This conversation has breached its SLA resolution target. Prioritize a prompt, helpful response.";
-            }
-
-            return $prompt;
-        });
-
         // ── Schedule breach detection every 5 minutes ────────────────────────
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
             $schedule->job(CheckSlaBreachJob::class, 'default')->everyFiveMinutes();

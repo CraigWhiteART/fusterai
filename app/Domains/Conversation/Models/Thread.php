@@ -3,6 +3,7 @@
 namespace App\Domains\Conversation\Models;
 
 use App\Domains\Customer\Models\Customer;
+use App\Domains\Mailbox\Sync\Models\MailMessage;
 use App\Enums\ThreadType;
 use App\Models\User;
 use Database\Factories\ThreadFactory;
@@ -46,6 +47,10 @@ class Thread extends Model
         'send_at',
         'tracking_token',
         'opened_at',
+        'message_id',
+        'sent_at',
+        'origin',
+        'mail_message_id',
     ];
 
     protected $casts = [
@@ -53,7 +58,20 @@ class Thread extends Model
         'meta' => 'array',
         'send_at' => 'datetime',
         'opened_at' => 'datetime',
+        'sent_at' => 'datetime',
     ];
+
+    /** Written in fusterai (agent reply, note, or a customer message that arrived live). */
+    public const ORIGIN_FUSTERAI = 'fusterai';
+
+    /** Written by staff directly in Gmail and picked up by the mail sync. */
+    public const ORIGIN_GMAIL = 'gmail';
+
+    /** Materialised from mailbox history (historical ingest / backfill). */
+    public const ORIGIN_IMPORT = 'import';
+
+    /** Sent by the AI agent without a human. */
+    public const ORIGIN_AI = 'ai';
 
     // ── Relations ────────────────────────────────────────────────
 
@@ -73,6 +91,12 @@ class Thread extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /** @return BelongsTo<MailMessage, $this> */
+    public function mailMessage(): BelongsTo
+    {
+        return $this->belongsTo(MailMessage::class);
     }
 
     /** @return HasMany<Attachment, $this> */

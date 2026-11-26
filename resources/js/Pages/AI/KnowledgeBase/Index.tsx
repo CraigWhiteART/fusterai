@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/roles';
 import React from 'react';
 import { Head, Link, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
@@ -20,9 +21,8 @@ interface Props {
 }
 
 export default function Index({ knowledgeBases }: Props) {
-    const commerceAssist = ((usePage<PageProps>().props as { activeModules?: string[] }).activeModules ?? []).includes(
-        'CommerceAssist',
-    );
+    const { auth } = usePage<PageProps>().props;
+    const admin = isAdminRole(auth?.user?.role);
 
     return (
         <AppLayout>
@@ -47,8 +47,8 @@ export default function Index({ knowledgeBases }: Props) {
                                 <Link href={route('ai.knowledge-bases.create')}>
                                     <Button variant="outline">Create your first</Button>
                                 </Link>
-                                {commerceAssist && (
-                                    <Link href="/settings/commerce-assist/learn">
+                                {admin && (
+                                    <Link href="/agent/mining">
                                         <Button variant="ghost">Learn from sent emails</Button>
                                     </Link>
                                 )}

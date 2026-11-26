@@ -61,7 +61,7 @@ test('DELETE unsubscribe is idempotent when already blocked', function () {
     expect($this->customer->fresh()->is_blocked)->toBeTrue();
 });
 
-// ── List-Unsubscribe header in SendReplyJob ───────────────────────────────────
+// ── SendReplyJob headers ──────────────────────────────────────────────────────
 
 test('SendReplyJob stores outbound_message_id in thread meta', function () {
     Queue::fake();
@@ -89,6 +89,43 @@ test('SendReplyJob stores outbound_message_id in thread meta', function () {
     // Stored with angle brackets so it matches what mail servers return in bounce notifications
     expect($thread->fresh()->meta['outbound_message_id'])->toStartWith('<thread-')
         ->and($thread->fresh()->meta['outbound_message_id'])->toEndWith('@fusterai>');
+});
+
+test('SendReplyJob does not add List-Unsubscribe headers to support replies', function () {
+    // Real (array) transport rather than Mail::fake(), so the built message
+    // and its headers can be inspected.
+    config(['mail.mailers.smtp' => ['transport' => 'array']]);
+    app('mail.manager')->purge('smtp');
+
+    $agent = User::factory()->create(['workspace_id' => $this->workspace->id]);
+    $conversation = Conversation::factory()->create([
+        'workspace_id' => $this->workspace->id,
+        'mailbox_id' => $this->mailbox->id,
+        'customer_id' => $this->customer->id,
+        'channel_type' => 'email',
+    ]);
+    $thread = Thread::factory()->create([
+        'conversation_id' => $conversation->id,
+        'user_id' => $agent->id,
+        'customer_id' => null,
+        'type' => 'message',
+        'source' => 'web',
+    ]);
+
+    (new SendReplyJob($thread, $conversation))->handle();
+
+    $sent = app('mail.manager')->mailer('smtp')->getSymfonyTransport()->messages();
+    expect($sent)->toHaveCount(1);
+
+    $headers = $sent->first()->getOriginalMessage()->getHeaders();
+    expect($headers->has('List-Unsubscribe'))->toBeFalse()
+        ->and($headers->has('List-Unsubscribe-Post'))->toBeFalse()
+        // Threading headers are untouched.
+        ->and($headers->has('In-Reply-To'))->toBeTrue()
+        ->and($headers->has('References'))->toBeTrue()
+        ->and($headers->has('Message-ID'))->toBeTrue();
+
+    expect($this->customer->fresh()->is_blocked)->toBeFalse();
 });
 
 // ── Soft bounce retry ─────────────────────────────────────────────────────────

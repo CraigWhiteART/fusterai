@@ -53,8 +53,14 @@ class MailboxController extends Controller
     {
         $this->authorize('update', $mailbox);
 
+        // Passwords never leave the server: the configs are $hidden on the model
+        // and only the password-free versions (with has_password) are sent.
         return Inertia::render('Mailboxes/Settings', [
-            'mailbox' => $mailbox,
+            'mailbox' => [
+                ...$mailbox->toArray(),
+                'imap_config' => $mailbox->safeImapConfig(),
+                'smtp_config' => $mailbox->safeSmtpConfig(),
+            ],
         ]);
     }
 

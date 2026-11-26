@@ -2,6 +2,7 @@ import React from 'react';
 import { Head, Link, useForm } from '@inertiajs/react';
 import PortalLayout from '@/Layouts/PortalLayout';
 import { Button } from '@/Components/ui/button';
+import { sanitizeHtml } from '@/lib/utils';
 
 interface Thread {
     id: number;
@@ -79,7 +80,7 @@ export default function TicketsShow({ workspace, ticket }: Props) {
                         </div>
                         <div
                             className="text-sm text-gray-700 prose prose-sm max-w-none"
-                            dangerouslySetInnerHTML={{ __html: thread.body }}
+                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(thread.body, { attachmentImages: false }) }}
                         />
                     </div>
                 ))}

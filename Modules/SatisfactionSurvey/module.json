@@ -6,6 +6,6 @@
     "author": "FusterAI",
     "hooks": {
         "actions": ["conversation.closed"],
-        "filters": ["conversation.show.extra", "ai.system_prompt"]
+        "filters": ["conversation.show.extra"]
     }
 }

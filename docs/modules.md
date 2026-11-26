@@ -59,7 +59,7 @@ mkdir -p Modules/MyModule/{Providers,Http/Controllers,Database/Migrations,Resour
 namespace Modules\MyModule\Providers;
 
 use Illuminate\Support\ServiceProvider;
-use App\Facades\Hook;
+use App\Support\Hooks;
 use App\Domains\Conversation\Models\Conversation;
 
 class MyModuleServiceProvider extends ServiceProvider
@@ -81,7 +81,7 @@ class MyModuleServiceProvider extends ServiceProvider
 
     private function registerHooks(): void
     {
-        Hook::listen('conversation.created', function (Conversation $conv) {
+        Hooks::addAction('conversation.created', function (Conversation $conv) {
             // React to new conversations
         });
     }
@@ -106,71 +106,44 @@ return [
 
 ## Hook System
 
-The hook system is FusterAI's event/filter bus for modules.
-
-### Actions (one-way events)
-
-Listen to events without modifying data:
+`App\Support\Hooks` is a small static action/filter bus for modules
+(`Hooks::addAction($hook, $callback, $priority)`, `Hooks::addFilter(...)`).
+Register hooks in your provider's `boot()`; only active modules' providers boot.
 
 ```php
-// Called when a new conversation is created
-Hook::listen('conversation.created', function (Conversation $conv) {
-    // Send a Slack notification, start a timer, etc.
+use App\Support\Hooks;
+
+// Action: react to an event (return value ignored)
+Hooks::addAction('thread.created', function (Thread $thread) {
+    // Index in external search, trigger a webhook, etc.
 });
 
-// Called when a thread (message/note) is added
-Hook::listen('thread.created', function (Thread $thread) {
-    // Index in external search, trigger webhook, etc.
-});
+// Filter: add data to the conversation page payload (must return the value)
+Hooks::addFilter('conversation.show.extra', function (array $extra, Conversation $conversation) {
+    $extra['myModule'] = ['score' => 42];
 
-// Called when a conversation is assigned
-Hook::listen('conversation.assigned', function (Conversation $conv, ?User $agent) {
-    // Notify the agent via external channel
-});
-
-// Called when a conversation status changes
-Hook::listen('conversation.status_changed', function (Conversation $conv, string $oldStatus) {
-    // Start SLA timer, send satisfaction survey, etc.
+    return $extra;
 });
 ```
 
-### Filters (modify data before use)
+### Hooks the core fires
 
-```php
-// Modify the AI system prompt
-Hook::filter('ai.system_prompt', function (string $prompt, Conversation $conv) {
-    return $prompt . "\n\nCustomer account tier: " . $conv->customer->meta['tier'];
-});
-
-// Add context to AI generation
-Hook::filter('ai.context', function (array $context, Conversation $conv) {
-    $context['sla_deadline'] = $conv->sla_deadline_at;
-    return $context;
-});
-
-// Modify the reply before it's sent
-Hook::filter('reply.before_send', function (array $reply, Conversation $conv) {
-    $reply['body'] .= "\n\n" . config('my-module.email_footer');
-    return $reply;
-});
-```
-
-### Available hook events
-
-| Event | Type | Payload |
+| Hook | Type | Payload |
 |---|---|---|
 | `conversation.created` | Action | `Conversation` |
 | `conversation.updated` | Action | `Conversation` |
-| `conversation.assigned` | Action | `Conversation, ?User` |
-| `conversation.status_changed` | Action | `Conversation, string $oldStatus` |
 | `conversation.closed` | Action | `Conversation` |
-| `thread.created` | Action | `Thread` |
-| `customer.created` | Action | `Customer` |
-| `ai.suggestion_generated` | Action | `AiSuggestion, Conversation` |
-| `ai.system_prompt` | Filter | `string $prompt, Conversation` |
-| `ai.context` | Filter | `array $context, Conversation` |
-| `reply.before_send` | Filter | `array $reply, Conversation` |
-| `conversation.sidebar` | Action | `Conversation` (React slot) |
+| `thread.created` | Action | `Thread` (customer messages, staff replies from the app or ingested from Gmail) |
+| `conversation.show.extra` | Filter | `array $extra, Conversation` (merged into the conversation page props) |
+| `survey.responded` | Action | fired by the SatisfactionSurvey module |
+
+There is no hook into the AI agent's prompts or drafts. The agent's
+instructions are versioned, human-approved content (voice, playbooks,
+knowledge, examples) that simulations and the regression gate can replay
+exactly; code that changed the prompt behind their back would break that.
+Change what the agent does through Agent → Voice / Playbooks / Knowledge
+(docs/agent-proposals.md). The old `ai.system_prompt`, `ai.context` and
+`ai.generate_reply` filters were removed with the legacy drafter.
 
 ---
 
@@ -231,7 +204,7 @@ return new class extends Migration
 In your Service Provider, push a component into a named slot:
 
 ```php
-use App\Facades\Hook;
+use App\Support\Hooks;
 
 Hook::add_action('conversation.sidebar', [MyModule::class, 'renderSidebarPanel']);
 ```
@@ -284,7 +257,7 @@ A minimal module that sends a survey link when a conversation is closed:
 namespace Modules\SatisfactionSurvey\Providers;
 
 use Illuminate\Support\ServiceProvider;
-use App\Facades\Hook;
+use App\Support\Hooks;
 use App\Domains\Conversation\Models\Conversation;
 
 class SatisfactionSurveyServiceProvider extends ServiceProvider

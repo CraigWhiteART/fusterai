@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Domains\Agent\Models\AgentSetting;
 use App\Domains\Conversation\Models\CustomView;
 use App\Domains\Conversation\Models\Tag;
 use App\Domains\Mailbox\Models\Mailbox;
@@ -63,10 +64,13 @@ class HandleInertiaRequests extends Middleware
                     "workspace.agent_statuses.{$agentUser->workspace_id}",
                     now()->addSeconds(30),
                     fn () => User::where('workspace_id', $agentUser->workspace_id)
-                        ->get(['id', 'status'])
                         ->pluck('status', 'id'),
                 )
                 : [],
+            // Kill switch / pause banner for admins (one indexed row; null for others).
+            'agentStatus' => fn () => $agentUser !== null && $agentUser->isAdmin()
+                ? AgentSetting::query()->where('workspace_id', $agentUser->workspace_id)->first(['mode', 'kill_switch', 'paused_until', 'paused_reason'])?->only(['mode', 'kill_switch', 'paused_until', 'paused_reason'])
+                : null,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),

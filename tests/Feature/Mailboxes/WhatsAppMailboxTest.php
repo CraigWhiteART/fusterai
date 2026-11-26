@@ -86,3 +86,58 @@ test('all WhatsApp credential fields are required', function () {
         ->post("/mailboxes/{$this->mailbox->id}/whatsapp", [])
         ->assertSessionHasErrors(['phone_number_id', 'access_token', 'app_secret']);
 });
+
+// ── secrets never reach the browser ────────────────────────────────────────────
+
+test('the setup page never receives the stored secrets', function () {
+    $this->mailbox->channels()->create([
+        'type' => 'whatsapp',
+        'config' => ['phone_number_id' => '555000', 'access_token' => 'EAA-super-secret-token', 'app_secret' => 'app-secret-xyz'],
+        'active' => true,
+    ]);
+
+    $response = $this->actingAs($this->admin)
+        ->get("/mailboxes/{$this->mailbox->id}/whatsapp")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Mailboxes/WhatsAppSetup')
+            ->where('mailbox.channel.phone_number_id', '555000')
+            ->where('mailbox.channel.has_access_token', true)
+            ->where('mailbox.channel.has_app_secret', true)
+            ->missing('mailbox.channel.config')
+            ->missing('mailbox.channel.access_token')
+            ->missing('mailbox.channel.app_secret'));
+
+    expect($response->getContent())->not->toContain('EAA-super-secret-token')->not->toContain('app-secret-xyz');
+});
+
+test('blank secrets keep the stored values', function () {
+    $this->mailbox->channels()->create([
+        'type' => 'whatsapp',
+        'config' => ['phone_number_id' => '111', 'access_token' => 'old-token', 'app_secret' => 'old-secret'],
+        'active' => true,
+    ]);
+
+    $this->actingAs($this->admin)
+        ->post("/mailboxes/{$this->mailbox->id}/whatsapp", ['phone_number_id' => '222', 'access_token' => '', 'app_secret' => ''])
+        ->assertSessionHasNoErrors()
+        ->assertRedirect();
+
+    $config = Channel::where('mailbox_id', $this->mailbox->id)->where('type', 'whatsapp')->firstOrFail()->config;
+    expect($config)->toBe(['phone_number_id' => '222', 'access_token' => 'old-token', 'app_secret' => 'old-secret']);
+});
+
+test('a new secret replaces the stored one', function () {
+    $this->mailbox->channels()->create([
+        'type' => 'whatsapp',
+        'config' => ['phone_number_id' => '111', 'access_token' => 'old-token', 'app_secret' => 'old-secret'],
+        'active' => true,
+    ]);
+
+    $this->actingAs($this->admin)
+        ->post("/mailboxes/{$this->mailbox->id}/whatsapp", ['phone_number_id' => '111', 'access_token' => 'new-token', 'app_secret' => ''])
+        ->assertSessionHasNoErrors();
+
+    $config = Channel::where('mailbox_id', $this->mailbox->id)->where('type', 'whatsapp')->firstOrFail()->config;
+    expect($config['access_token'])->toBe('new-token')->and($config['app_secret'])->toBe('old-secret');
+});

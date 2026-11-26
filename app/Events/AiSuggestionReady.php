@@ -16,6 +16,7 @@ class AiSuggestionReady implements ShouldBroadcast
         public readonly int $conversationId,
         public readonly string $content,
         public readonly int $suggestionId,
+        public readonly ?int $runId = null,
     ) {}
 
     public function broadcastOn(): PrivateChannel
@@ -34,6 +35,8 @@ class AiSuggestionReady implements ShouldBroadcast
             'conversation_id' => $this->conversationId,
             'suggestion_id' => $this->suggestionId,
             'content' => $this->content,
+            // Set when the agent pipeline produced the draft: GET /agent/conversations/{id}/run explains it.
+            'run_id' => $this->runId,
         ];
     }
 }

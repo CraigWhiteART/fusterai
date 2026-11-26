@@ -18,6 +18,7 @@ import {
 } from '@/Components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { cn, getInitials } from '@/lib/utils';
+import { isAdminRole } from '@/lib/roles';
 import { applyAppearance, persistAppearance, readStoredAppearance } from '@/lib/appearance';
 import { toast } from 'sonner';
 import {
@@ -54,8 +55,11 @@ import {
     GlobeIcon,
     ShuffleIcon,
     ThumbsUpIcon,
-    ShoppingBagIcon,
+    SparklesIcon,
 } from 'lucide-react';
+import { AGENT_SCREEN_PATHS, useOpenProposalCount } from '@/lib/agentLoop';
+import { usePendingActionCount } from '@/lib/agentActions';
+import { AGENT_NAV_GROUPS, isAgentLinkActive } from '@/Components/agent/agentNav';
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -203,6 +207,12 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
     const aiNavActive = ['/automation', '/ai/', '/settings/ai'].some((h) => path.startsWith(h));
     const customNavActive = ['/settings/appearance', '/settings/live-chat'].some((h) => path.startsWith(h));
     const portalNavActive = path.startsWith('/settings/portal');
+    const agentNavActive = path === '/agent' || path.startsWith('/agent/');
+    const isAdmin = isAdminRole(auth.user?.role);
+    // AI Agent menu badges: proposals waiting for review (admins) and Shopify actions waiting
+    // for approval (anyone whose role may approve some action; 403 → null).
+    const openProposals = useOpenProposalCount(isAdmin);
+    const pendingActions = usePendingActionCount(!!auth.user);
     const settingsNavActive =
         [
             '/settings/general',
@@ -215,7 +225,6 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
             '/settings/routing',
             '/settings/sla',
             '/settings/survey',
-            '/settings/commerce-assist',
             '/settings',
         ].some((h) => path.startsWith(h)) &&
         !customNavActive &&
@@ -734,6 +743,105 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                                     </DropdownMenuContent>
                                 </DropdownMenu>
 
+                                {/* AI Agent ▾ (admins: every /agent screen needs manage-settings) */}
+                                {isAdmin && (
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <button
+                                                className={cn(
+                                                    'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
+                                                    agentNavActive
+                                                        ? 'text-primary font-semibold'
+                                                        : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                                                )}
+                                            >
+                                                <SparklesIcon className="h-3.5 w-3.5" />
+                                                <span>AI Agent</span>
+                                                {pendingActions || openProposals ? (
+                                                    <span
+                                                        className="rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground tabular-nums"
+                                                        title={[
+                                                            pendingActions
+                                                                ? `${pendingActions} Shopify action${pendingActions === 1 ? '' : 's'} waiting for approval`
+                                                                : null,
+                                                            openProposals
+                                                                ? `${openProposals} proposal${openProposals === 1 ? '' : 's'} waiting for review`
+                                                                : null,
+                                                        ]
+                                                            .filter(Boolean)
+                                                            .join(', ')}
+                                                    >
+                                                        {(pendingActions ?? 0) + (openProposals ?? 0)}
+                                                    </span>
+                                                ) : null}
+                                                <ChevronDownIcon className="h-3 w-3 opacity-50" />
+                                            </button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent
+                                            align="start"
+                                            className="max-h-[80vh] w-56 overflow-y-auto border-0 bg-popover/95 shadow-xl backdrop-blur"
+                                        >
+                                            {AGENT_NAV_GROUPS.map((group, gi) => (
+                                                <DropdownMenuGroup key={group.label ?? 'top'}>
+                                                    {gi > 0 && <DropdownMenuSeparator />}
+                                                    {group.label && (
+                                                        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                                                            {group.label}
+                                                        </DropdownMenuLabel>
+                                                    )}
+                                                    {group.links.map((link) => {
+                                                        const Icon = link.icon;
+                                                        const badge =
+                                                            link.badge === 'actions'
+                                                                ? pendingActions
+                                                                : link.badge === 'proposals'
+                                                                  ? openProposals
+                                                                  : null;
+                                                        return (
+                                                            <DropdownMenuItem key={link.href} asChild>
+                                                                <Link
+                                                                    href={link.href}
+                                                                    className={cn(
+                                                                        'w-full',
+                                                                        isAgentLinkActive(link, path) && 'text-primary',
+                                                                    )}
+                                                                >
+                                                                    <Icon className="h-4 w-4" />
+                                                                    <span>{link.label}</span>
+                                                                    {badge ? (
+                                                                        <span className="ml-auto rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary tabular-nums">
+                                                                            {badge}
+                                                                        </span>
+                                                                    ) : null}
+                                                                </Link>
+                                                            </DropdownMenuItem>
+                                                        );
+                                                    })}
+                                                </DropdownMenuGroup>
+                                            ))}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                )}
+
+                                {/* Non-admin approvers: a direct link when Shopify actions wait for them. */}
+                                {!isAdmin && pendingActions ? (
+                                    <Link
+                                        href={AGENT_SCREEN_PATHS.actions}
+                                        className={cn(
+                                            'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium whitespace-nowrap transition-all',
+                                            path.startsWith(AGENT_SCREEN_PATHS.actions)
+                                                ? 'text-primary font-semibold'
+                                                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                                        )}
+                                    >
+                                        <SparklesIcon className="h-3.5 w-3.5" />
+                                        <span>Approvals</span>
+                                        <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground tabular-nums">
+                                            {pendingActions}
+                                        </span>
+                                    </Link>
+                                ) : null}
+
                                 {/* Customization ▾ */}
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
@@ -914,67 +1022,6 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                                                         <span>Customer Portal</span>
                                                     </Link>
                                                 </DropdownMenuItem>
-                                            )}
-                                            {(usePage<PageProps>().props as any).activeModules?.includes('CommerceAssist') && (
-                                                <>
-                                                    <DropdownMenuItem asChild>
-                                                        <Link
-                                                            href="/settings/commerce-assist"
-                                                            className={cn('w-full', path === '/settings/commerce-assist' && 'text-primary')}
-                                                        >
-                                                            <ShoppingBagIcon className="h-4 w-4" />
-                                                            <span>Commerce Assist</span>
-                                                        </Link>
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem asChild>
-                                                        <Link
-                                                            href="/settings/commerce-assist/learn"
-                                                            className={cn(
-                                                                'w-full',
-                                                                path.startsWith('/settings/commerce-assist/learn') && 'text-primary',
-                                                            )}
-                                                        >
-                                                            <BookOpenIcon className="h-4 w-4" />
-                                                            <span>Learn from history</span>
-                                                        </Link>
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem asChild>
-                                                        <Link
-                                                            href="/settings/commerce-assist/facts"
-                                                            className={cn(
-                                                                'w-full',
-                                                                path.startsWith('/settings/commerce-assist/facts') && 'text-primary',
-                                                            )}
-                                                        >
-                                                            <ShoppingBagIcon className="h-4 w-4" />
-                                                            <span>Current Facts</span>
-                                                        </Link>
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem asChild>
-                                                        <Link
-                                                            href="/settings/commerce-assist/examples"
-                                                            className={cn(
-                                                                'w-full',
-                                                                path.startsWith('/settings/commerce-assist/examples') && 'text-primary',
-                                                            )}
-                                                        >
-                                                            <MessageSquareTextIcon className="h-4 w-4" />
-                                                            <span>Approved Replies</span>
-                                                        </Link>
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem asChild>
-                                                        <Link
-                                                            href="/settings/commerce-assist/replay"
-                                                            className={cn(
-                                                                'w-full',
-                                                                path.startsWith('/settings/commerce-assist/replay') && 'text-primary',
-                                                            )}
-                                                        >
-                                                            <BrainIcon className="h-4 w-4" />
-                                                            <span>AI Replay</span>
-                                                        </Link>
-                                                    </DropdownMenuItem>
-                                                </>
                                             )}
                                         </DropdownMenuGroup>
                                     </DropdownMenuContent>

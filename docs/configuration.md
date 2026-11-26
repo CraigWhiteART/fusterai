@@ -105,7 +105,9 @@ php artisan scout:import "App\Domains\Conversation\Models\Conversation"
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `HORIZON_DRIVER` | `redis` | Yes | Must be `redis` |
+| `QUEUE_CONNECTION` | `redis` | Yes | Horizon only runs Redis queues |
+| `REDIS_QUEUE_RETRY_AFTER` | `360` | No | Seconds before a reserved job on `redis` is retried. Must stay above the longest supervisor timeout there (`ai` = 330). A lower value (e.g. an old `90`) runs slow AI jobs twice. |
+| `REDIS_LONG_QUEUE_RETRY_AFTER` | `960` | No | Same for the `redis-long` connection (`ai-bulk` supervisor, timeout 900): mining, history backfill, simulations, QA backfill. |
 
 Horizon dashboard is available at `/horizon`. Access is restricted to admin users in production (`APP_ENV=production`). All environments allow local access.
 

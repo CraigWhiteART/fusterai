@@ -27,7 +27,10 @@ class DashboardController extends Controller
             ", [$userId])
             ->first();
 
+        // Imported history (backfill) is left out of the volume trend and the
+        // recent list: it is dated in the past but was never handled here.
         $trend = Conversation::where('workspace_id', $workspaceId)
+            ->where('imported', false)
             ->where('created_at', '>=', now()->subDays(14))
             ->selectRaw('DATE(created_at) as date, COUNT(*) as count')
             ->groupBy('date')
@@ -35,6 +38,7 @@ class DashboardController extends Controller
             ->get();
 
         $recent = Conversation::where('workspace_id', $workspaceId)
+            ->where('imported', false)
             ->with('customer:id,name,email')
             ->orderByDesc('last_reply_at')
             ->limit(5)

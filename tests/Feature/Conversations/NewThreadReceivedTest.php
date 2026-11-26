@@ -95,7 +95,8 @@ test('NewThreadReceived broadcasts on the correct private channel', function () 
     expect($channelNames)->toContain("private-conversation.{$this->conversation->id}");
 });
 
-test('NewThreadReceived also broadcasts on public livechat channel for chat source', function () {
+test('NewThreadReceived also broadcasts on the visitor token channel for chat source', function () {
+    $token = $this->conversation->ensureChatToken();
     $thread = Thread::factory()->create([
         'conversation_id' => $this->conversation->id,
         'source' => 'chat',
@@ -106,6 +107,19 @@ test('NewThreadReceived also broadcasts on public livechat channel for chat sour
 
     $channelNames = array_map(fn ($ch) => $ch->name, $channels);
 
-    expect($channelNames)->toContain("livechat.{$this->conversation->id}");
+    expect($channelNames)->toContain("livechat.{$token}")
+        ->not->toContain("livechat.{$this->conversation->id}");
+    expect(strlen($token))->toBeGreaterThanOrEqual(40);
     expect(count($channels))->toBe(2);
+});
+
+test('NewThreadReceived never uses a public channel for a chat with no token', function () {
+    $thread = Thread::factory()->create([
+        'conversation_id' => $this->conversation->id,
+        'source' => 'chat',
+    ]);
+
+    $channelNames = array_map(fn ($ch) => $ch->name, (new NewThreadReceived($thread))->broadcastOn());
+
+    expect($channelNames)->toBe(["private-conversation.{$this->conversation->id}"]);
 });

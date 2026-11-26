@@ -19,14 +19,40 @@ const OPENROUTER_MODELS = [
 ];
 
 const ANTHROPIC_MODELS = [
-    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 (most capable)' },
-    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (fastest)' },
-    { value: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
-    { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
-    { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
-    { value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku' },
+    { value: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
+    { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
+    { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5 (fastest)' },
+    { value: 'claude-fable-5-2', label: 'Claude Fable 5.2 (most capable, highest cost)' },
 ];
+
+type Role =
+    | 'triage'
+    | 'writer'
+    | 'validator'
+    | 'history_extraction'
+    | 'simulation_judge'
+    | 'manager'
+    | 'auto_categorization'
+    | 'summarization';
+
+const ROLES: { key: Role; label: string; desc: string }[] = [
+    { key: 'triage', label: 'Triage', desc: 'Classifies each email: intent, sentiment, risk.' },
+    { key: 'writer', label: 'Writer', desc: 'Drafts the customer reply.' },
+    { key: 'validator', label: 'Validator', desc: 'Checks the draft for unsupported claims. Use a different model from the writer.' },
+    { key: 'history_extraction', label: 'History extraction', desc: 'Pulls reusable knowledge out of past sent replies.' },
+    { key: 'simulation_judge', label: 'Simulation judge', desc: 'Scores simulated drafts against past tickets.' },
+    { key: 'manager', label: 'Manager', desc: 'Turns feedback into proposed instruction changes.' },
+    { key: 'auto_categorization', label: 'Auto-categorization', desc: 'Sets priority and tags on new conversations.' },
+    { key: 'summarization', label: 'Summarization', desc: 'Summarizes closed conversations.' },
+];
+
+type EmbeddingsProvider = '' | 'openai' | 'openai-compatible';
+
+const EMBEDDINGS_SOURCE_LABELS: Record<string, string> = {
+    workspace: 'Using the embeddings key saved here',
+    workspace_main_key: 'Using the main AI key above',
+    env: 'Using the server OPENAI_API_KEY (environment fallback)',
+};
 
 const OPENAI_MODELS = [
     { value: 'gpt-4o', label: 'GPT-4o' },
@@ -72,17 +98,26 @@ interface AiConfig {
         auto_categorization: boolean;
         summarization: boolean;
     };
-    task_models?: {
-        reply_suggestions: string | null;
-        auto_categorization: string | null;
-        summarization: string | null;
-    };
+    task_models?: Partial<Record<Role, string | null>>;
+    role_defaults?: Partial<Record<Role, string>>;
     reasoning?: {
         effort: string;
         exclude: boolean;
         max_tokens: number | null;
     };
     rag: { top_k: number; min_score: number };
+    embeddings?: {
+        provider: EmbeddingsProvider | null;
+        model: string | null;
+        base_url: string | null;
+        dimensions: number;
+        key_set: boolean;
+        configured: boolean;
+        source: string | null;
+        active_provider: string | null;
+        active_model: string | null;
+        env_fallback_enabled: boolean;
+    };
 }
 
 interface Props extends PageProps {
@@ -199,6 +234,28 @@ function ModelPicker({
 export default function AIConfig({ aiConfig }: Props) {
     const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle');
     const [testMessage, setTestMessage] = useState('');
+    const [embedStatus, setEmbedStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle');
+    const [embedMessage, setEmbedMessage] = useState('');
+
+    async function testEmbeddings() {
+        setEmbedStatus('loading');
+        setEmbedMessage('');
+        try {
+            const res = await fetch('/settings/ai/test-embeddings', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': (document.querySelector('[name="csrf-token"]') as HTMLMetaElement | null)?.content ?? '',
+                    Accept: 'application/json',
+                },
+            });
+            const body = await res.json();
+            setEmbedStatus(body.ok ? 'ok' : 'fail');
+            setEmbedMessage(body.message ?? '');
+        } catch {
+            setEmbedStatus('fail');
+            setEmbedMessage('Network error. Could not reach the server.');
+        }
+    }
 
     async function testConnection() {
         setTestStatus('loading');
@@ -228,7 +285,12 @@ export default function AIConfig({ aiConfig }: Props) {
         feature_reply_suggestions: aiConfig.features?.reply_suggestions ?? true,
         feature_auto_categorization: aiConfig.features?.auto_categorization ?? true,
         feature_summarization: aiConfig.features?.summarization ?? true,
-        model_reply_suggestions: aiConfig.task_models?.reply_suggestions ?? '',
+        model_triage: aiConfig.task_models?.triage ?? '',
+        model_writer: aiConfig.task_models?.writer ?? '',
+        model_validator: aiConfig.task_models?.validator ?? '',
+        model_history_extraction: aiConfig.task_models?.history_extraction ?? '',
+        model_simulation_judge: aiConfig.task_models?.simulation_judge ?? '',
+        model_manager: aiConfig.task_models?.manager ?? '',
         model_auto_categorization: aiConfig.task_models?.auto_categorization ?? '',
         model_summarization: aiConfig.task_models?.summarization ?? '',
         reasoning_effort: aiConfig.reasoning?.effort ?? 'none',
@@ -236,7 +298,14 @@ export default function AIConfig({ aiConfig }: Props) {
         reasoning_max_tokens: aiConfig.reasoning?.max_tokens ?? ('' as number | ''),
         rag_top_k: aiConfig.rag?.top_k ?? 5,
         rag_min_score: aiConfig.rag?.min_score ?? 0.7,
+        embeddings_provider: (aiConfig.embeddings?.provider ?? '') as EmbeddingsProvider,
+        embeddings_api_key: '',
+        embeddings_model: aiConfig.embeddings?.model ?? '',
+        embeddings_base_url: aiConfig.embeddings?.base_url ?? '',
+        embeddings_dimensions: aiConfig.embeddings?.dimensions ?? 1536,
     });
+
+    const embeddings = aiConfig.embeddings;
 
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -246,7 +315,7 @@ export default function AIConfig({ aiConfig }: Props) {
     const isCompatible = data.provider === 'openai-compatible';
     const isOpenRouter = data.provider === 'openrouter';
     const models = data.provider === 'anthropic' ? ANTHROPIC_MODELS : data.provider === 'openrouter' ? OPENROUTER_MODELS : OPENAI_MODELS;
-    const showReasoningBudget = data.provider === 'anthropic' && data.reasoning_effort !== 'none';
+    const isAnthropic = data.provider === 'anthropic';
 
     return (
         <AppLayout>
@@ -282,9 +351,7 @@ export default function AIConfig({ aiConfig }: Props) {
                                     setData('provider', v as Provider);
                                     setData('model', '');
                                     setData('base_url', '');
-                                    setData('model_reply_suggestions', '');
-                                    setData('model_auto_categorization', '');
-                                    setData('model_summarization', '');
+                                    ROLES.forEach((r) => setData(`model_${r.key}`, ''));
                                 }}
                             >
                                 <option value="anthropic">Anthropic — Claude models</option>
@@ -343,9 +410,11 @@ export default function AIConfig({ aiConfig }: Props) {
                         <Field
                             label="Default model"
                             hint={
-                                isCompatible
-                                    ? 'Enter the exact model identifier from your provider. Used when a task has no override.'
-                                    : 'Used for all tasks unless you set a per-task override below.'
+                                isAnthropic
+                                    ? 'Optional. Roles left blank below use their recommended Claude model; this default is only used where no role applies.'
+                                    : isCompatible
+                                      ? 'Required. Enter the exact model identifier from your provider. Used by every role without its own model.'
+                                      : 'Required. Used by every role without its own model.'
                             }
                             error={errors.model}
                         >
@@ -370,79 +439,56 @@ export default function AIConfig({ aiConfig }: Props) {
 
                     <section className="bg-white border border-border rounded-lg p-6 space-y-5">
                         <div>
-                            <h2 className="font-medium text-base">Models by task</h2>
+                            <h2 className="font-medium text-base">Models by role</h2>
                             <p className="text-xs text-muted-foreground mt-0.5">
-                                Optional overrides. Leave blank to use the default model. Tip: use a fast/cheap model for categorization and
-                                a stronger one for reply suggestions.
+                                {isAnthropic
+                                    ? 'Leave a role blank to use its recommended model (shown). The validator and simulation judge use a different model from the writer on purpose.'
+                                    : 'Leave a role blank to use the default model above.'}
                             </p>
                         </div>
 
-                        <Field label="Reply suggestions" error={errors.model_reply_suggestions}>
-                            <ModelPicker
-                                value={data.model_reply_suggestions}
-                                onChange={(v) => setData('model_reply_suggestions', v)}
-                                provider={data.provider}
-                                models={models}
-                                allowEmpty
-                            />
-                        </Field>
+                        {ROLES.map((role) => {
+                            const field = `model_${role.key}` as const;
+                            const recommended = aiConfig.role_defaults?.[role.key];
 
-                        <Field label="Auto-categorization" error={errors.model_auto_categorization}>
-                            <ModelPicker
-                                value={data.model_auto_categorization}
-                                onChange={(v) => setData('model_auto_categorization', v)}
-                                provider={data.provider}
-                                models={models}
-                                allowEmpty
-                            />
-                        </Field>
-
-                        <Field label="Summarization" error={errors.model_summarization}>
-                            <ModelPicker
-                                value={data.model_summarization}
-                                onChange={(v) => setData('model_summarization', v)}
-                                provider={data.provider}
-                                models={models}
-                                allowEmpty
-                            />
-                        </Field>
+                            return (
+                                <Field key={role.key} label={role.label} hint={role.desc} error={errors[field]}>
+                                    <ModelPicker
+                                        value={data[field]}
+                                        onChange={(v) => setData(field, v)}
+                                        provider={data.provider}
+                                        models={models}
+                                        allowEmpty
+                                        emptyLabel={isAnthropic && recommended ? `Recommended: ${recommended}` : 'Use default model'}
+                                    />
+                                </Field>
+                            );
+                        })}
                     </section>
 
                     <section className="bg-white border border-border rounded-lg p-6 space-y-5">
                         <div>
                             <h2 className="font-medium text-base">Reasoning</h2>
                             <p className="text-xs text-muted-foreground mt-0.5">
-                                Controls thinking / reasoning tokens when the provider supports them (OpenAI reasoning models, OpenRouter{' '}
-                                <code className="text-[11px]">reasoning</code> object, Anthropic extended thinking).
+                                Controls reasoning tokens for OpenAI reasoning models and the OpenRouter{' '}
+                                <code className="text-[11px]">reasoning</code> object.
                             </p>
                         </div>
 
-                        <Field label="Reasoning effort" error={errors.reasoning_effort}>
-                            <NativeSelect value={data.reasoning_effort} onChange={(v) => setData('reasoning_effort', v)}>
-                                {REASONING_EFFORTS.map((o) => (
-                                    <option key={o.value} value={o.value}>
-                                        {o.label}
-                                    </option>
-                                ))}
-                            </NativeSelect>
-                        </Field>
-
-                        {showReasoningBudget && (
-                            <Field
-                                label="Thinking budget (tokens)"
-                                hint="Anthropic-style max thinking tokens. Leave blank to use a default based on effort."
-                                error={errors.reasoning_max_tokens}
-                            >
-                                <Input
-                                    type="number"
-                                    min={1}
-                                    max={100000}
-                                    placeholder="e.g. 2000"
-                                    value={data.reasoning_max_tokens}
-                                    onChange={(e) =>
-                                        setData('reasoning_max_tokens', e.target.value === '' ? '' : parseInt(e.target.value, 10))
-                                    }
-                                />
+                        {isAnthropic ? (
+                            <p className="text-sm text-muted-foreground">
+                                Current Claude models think adaptively on every request and reject fixed thinking budgets, so this setting
+                                is not sent to Anthropic.
+                            </p>
+                        ) : (
+                            <Field label="Reasoning effort" error={errors.reasoning_effort}>
+                                <NativeSelect value={data.reasoning_effort} onChange={(v) => setData('reasoning_effort', v)}>
+                                    {REASONING_EFFORTS.map((o) => (
+                                        <option key={o.value} value={o.value}>
+                                            {o.label}
+                                        </option>
+                                    ))}
+                                </NativeSelect>
                             </Field>
                         )}
 
@@ -472,7 +518,7 @@ export default function AIConfig({ aiConfig }: Props) {
                             {
                                 key: 'feature_reply_suggestions' as const,
                                 label: 'Auto-suggest replies',
-                                desc: 'Generate AI reply drafts when a new customer message arrives.',
+                                desc: 'Let the AI agent draft on its own when a new customer message arrives (Agent → Settings mode draft / live / shadow). "AI Suggest" in a conversation always works.',
                             },
                             {
                                 key: 'feature_auto_categorization' as const,
@@ -498,6 +544,127 @@ export default function AIConfig({ aiConfig }: Props) {
                                 </div>
                             </label>
                         ))}
+                    </section>
+
+                    <section className="bg-white border border-border rounded-lg p-6 space-y-5">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <h2 className="font-medium text-base">Embeddings</h2>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                    Used for semantic search of the knowledge base and approved replies. Anthropic has no embeddings API, so
+                                    this is set separately. Without embeddings, retrieval uses keyword search only.
+                                </p>
+                            </div>
+                            {embeddings?.configured ? (
+                                <Badge variant="success">Configured</Badge>
+                            ) : (
+                                <Badge variant="secondary">Not configured</Badge>
+                            )}
+                        </div>
+
+                        <p className="text-sm">
+                            {embeddings?.configured && embeddings.source ? (
+                                <>
+                                    {EMBEDDINGS_SOURCE_LABELS[embeddings.source] ?? embeddings.source}
+                                    {embeddings.active_model && (
+                                        <span className="text-muted-foreground">
+                                            {' '}
+                                            · {embeddings.active_provider} · {embeddings.active_model}
+                                        </span>
+                                    )}
+                                </>
+                            ) : (
+                                <span className="text-muted-foreground">
+                                    No embeddings source is active. Documents are still indexed for keyword search.
+                                </span>
+                            )}
+                        </p>
+
+                        <Field label="Embeddings provider" error={errors.embeddings_provider}>
+                            <NativeSelect
+                                value={data.embeddings_provider}
+                                onChange={(v) => setData('embeddings_provider', v as EmbeddingsProvider)}
+                            >
+                                <option value="">Not configured (keyword search only)</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="openai-compatible">OpenAI-compatible endpoint</option>
+                            </NativeSelect>
+                        </Field>
+
+                        {data.embeddings_provider !== '' && (
+                            <>
+                                {data.embeddings_provider === 'openai-compatible' && (
+                                    <Field label="Embeddings base URL" error={errors.embeddings_base_url}>
+                                        <Input
+                                            type="url"
+                                            placeholder="http://localhost:11434/v1"
+                                            value={data.embeddings_base_url}
+                                            onChange={(e) => setData('embeddings_base_url', e.target.value)}
+                                            autoComplete="off"
+                                        />
+                                    </Field>
+                                )}
+
+                                <Field
+                                    label="Embeddings model"
+                                    hint={
+                                        data.embeddings_provider === 'openai'
+                                            ? 'Leave blank for text-embedding-3-small.'
+                                            : 'The model must return 1536-dimensional vectors.'
+                                    }
+                                    error={errors.embeddings_model}
+                                >
+                                    <Input
+                                        placeholder={data.embeddings_provider === 'openai' ? 'text-embedding-3-small' : 'model name'}
+                                        value={data.embeddings_model}
+                                        onChange={(e) => setData('embeddings_model', e.target.value)}
+                                        autoComplete="off"
+                                    />
+                                </Field>
+
+                                <Field
+                                    label="Embeddings API key"
+                                    hint={
+                                        embeddings?.key_set
+                                            ? 'A key is saved. Enter a new one to replace it, or leave blank to keep it.'
+                                            : data.embeddings_provider === data.provider
+                                              ? 'Leave blank to use the main AI key above.'
+                                              : 'Encrypted before storage.'
+                                    }
+                                    error={errors.embeddings_api_key}
+                                >
+                                    <Input
+                                        type="password"
+                                        placeholder={embeddings?.key_set ? '●●●●●●●● (saved)' : 'sk-…'}
+                                        value={data.embeddings_api_key}
+                                        onChange={(e) => setData('embeddings_api_key', e.target.value)}
+                                        autoComplete="off"
+                                    />
+                                </Field>
+
+                                <Field
+                                    label="Dimensions"
+                                    hint="Fixed: the database stores 1536-dimensional vectors."
+                                    error={errors.embeddings_dimensions}
+                                >
+                                    <Input type="number" value={data.embeddings_dimensions} readOnly disabled />
+                                </Field>
+                            </>
+                        )}
+
+                        <div className="flex items-center gap-3">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={testEmbeddings}
+                                disabled={embedStatus === 'loading' || !embeddings?.configured}
+                                title={!embeddings?.configured ? 'Save an embeddings configuration first' : undefined}
+                            >
+                                {embedStatus === 'loading' ? 'Testing…' : 'Test embeddings'}
+                            </Button>
+                            {embedStatus === 'ok' && <span className="text-sm text-success font-medium">{embedMessage}</span>}
+                            {embedStatus === 'fail' && <span className="text-sm text-destructive">{embedMessage}</span>}
+                        </div>
                     </section>
 
                     <section className="bg-white border border-border rounded-lg p-6 space-y-4">

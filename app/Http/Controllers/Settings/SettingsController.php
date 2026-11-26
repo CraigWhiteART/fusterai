@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Settings;
 
 use App\Ai\Agents\SummarizationAgent;
+use App\Ai\EmbeddingService;
 use App\Domains\AI\Models\Module;
 use App\Domains\Mailbox\Models\Mailbox;
 use App\Http\Controllers\Controller;
@@ -130,6 +131,13 @@ class SettingsController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['ok' => false, 'message' => 'Connection failed: '.$e->getMessage()]);
         }
+    }
+
+    public function testAiEmbeddings(Request $request, EmbeddingService $embeddings): JsonResponse
+    {
+        $this->authorize('manage-settings');
+
+        return response()->json($embeddings->test($request->user()->workspace_id));
     }
 
     public function modules(): Response

@@ -20,6 +20,13 @@ declare global {
 }
 
 // Shared Inertia props
+export interface SharedAgentStatus {
+    mode: 'off' | 'shadow' | 'draft' | 'live' | string;
+    kill_switch: boolean;
+    paused_until: string | null;
+    paused_reason: string | null;
+}
+
 export interface PageProps {
     [key: string]: unknown;
     auth: {
@@ -31,6 +38,8 @@ export interface PageProps {
         token?: string;
     };
     agentStatuses: Record<number, string>;
+    /** Shared for admins only (null otherwise): kill switch / pause banner. */
+    agentStatus?: SharedAgentStatus | null;
     customViews?: CustomView[];
     folders?: Folder[];
     ziggy: {
@@ -100,6 +109,8 @@ export interface Mailbox {
     active: boolean;
     channel_type: string;
     signature?: string;
+    /** Extra addresses that count as "us" for mail sync. */
+    aliases?: string[] | null;
     created_at: string;
 }
 
@@ -156,6 +167,9 @@ export interface Thread {
     meta?: Record<string, unknown>;
     send_at?: string | null;
     opened_at?: string | null;
+    /** fusterai | gmail | import | ai */
+    origin?: 'fusterai' | 'gmail' | 'import' | 'ai';
+    sent_at?: string | null;
     created_at: string;
 
     // Relations
@@ -171,6 +185,8 @@ export interface Attachment {
     mime_type: string;
     size: number;
     url: string;
+    /** Inline image shown in the body (cid:), not listed as a download. */
+    inline?: boolean;
 }
 
 export interface Tag {

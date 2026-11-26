@@ -1,7 +1,6 @@
 <?php
 
 use App\Ai\Agents\CategorizationAgent;
-use App\Ai\Agents\ReplySuggestionAgent;
 use App\Ai\Agents\SummarizationAgent;
 use App\Domains\AI\Jobs\CategorizeConversationJob;
 use App\Domains\AI\Jobs\FetchUrlAndIndexJob;
@@ -19,6 +18,7 @@ use App\Events\AiSuggestionFailed;
 use App\Models\Workspace;
 use App\Services\AiSettingsService;
 use App\Support\SsrfGuard;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -77,28 +77,10 @@ test('SummarizeConversationJob saves summary using faked agent', function () {
     SummarizationAgent::assertPrompted(fn ($prompt) => true);
 });
 
-test('GenerateReplySuggestionJob creates AiSuggestion record', function () {
-    ReplySuggestionAgent::fake(['Here is a helpful reply for you.']);
-
+test('GenerateReplySuggestionJob does nothing on its own while the agent is off', function () {
     (new GenerateReplySuggestionJob($this->conversation))->handle();
 
-    expect(
-        AiSuggestion::where('conversation_id', $this->conversation->id)->exists()
-    )->toBeTrue();
-});
-
-test('GenerateReplySuggestionJob marks job as failed when AI throws', function () {
-    ReplySuggestionAgent::fake(function () {
-        throw new RuntimeException('AI provider unavailable');
-    });
-
-    $job = Mockery::mock(GenerateReplySuggestionJob::class.'[fail]', [$this->conversation])
-        ->shouldAllowMockingProtectedMethods()
-        ->makePartial();
-
-    $job->shouldReceive('fail')->once()->with(Mockery::type(RuntimeException::class));
-
-    $job->handle();
+    expect(AiSuggestion::where('conversation_id', $this->conversation->id)->exists())->toBeFalse();
 });
 
 test('AI feature flag disabled for workspace skips reply suggestion job', function () {
@@ -108,7 +90,7 @@ test('AI feature flag disabled for workspace skips reply suggestion job', functi
 
     Queue::fake();
 
-    // Simulate what ProcessInboundEmailJob does
+    // Simulate the feature check InboundMessageEffects makes
     $ai = app(AiSettingsService::class);
     if ($ai->isFeatureEnabled($this->workspace->id, 'reply_suggestions')) {
         GenerateReplySuggestionJob::dispatch($this->conversation)->onQueue('ai');
@@ -158,6 +140,10 @@ test('IndexKbDocumentJob failed() stores error message in document meta', functi
 test('IndexKbDocumentJob handle() clears index_error on successful re-index', function () {
     // Fake with no preset responses — SDK auto-generates vectors of the right dimensions
     Embeddings::fake();
+    $this->workspace->update(['settings' => ['ai_embeddings' => [
+        'provider' => 'openai',
+        'api_key' => Crypt::encryptString('sk-embed'),
+    ]]]);
 
     $kb = KnowledgeBase::create(['workspace_id' => $this->workspace->id, 'name' => 'Docs', 'active' => true]);
     $doc = $kb->documents()->create([

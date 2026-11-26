@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Agent\ImportHistoryController;
 use App\Http\Controllers\AgentStatusController;
 use App\Http\Controllers\AI\AiController;
 use App\Http\Controllers\AI\KnowledgeBaseController;
@@ -9,6 +10,7 @@ use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Automation\AutomationController;
+use App\Http\Controllers\Conversations\AttachmentController;
 use App\Http\Controllers\Conversations\ConversationController;
 use App\Http\Controllers\Conversations\FollowerController;
 use App\Http\Controllers\Conversations\SearchController;
@@ -94,6 +96,7 @@ Route::middleware('auth')->group(function () {
 
     // Threads
     Route::post('/conversations/{conversation}/threads', [ThreadController::class, 'store'])->name('threads.store');
+    Route::get('/attachments/{attachment}', [AttachmentController::class, 'show'])->name('attachments.show');
     Route::delete('/conversations/{conversation}/threads/{thread}/schedule', [ThreadController::class, 'cancelSchedule'])->name('threads.schedule.cancel');
 
     // Followers
@@ -182,6 +185,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/settings/ai', [SettingsController::class, 'ai'])->name('settings.ai');
     Route::patch('/settings/ai', [SettingsController::class, 'updateAi'])->name('settings.ai.update');
     Route::post('/settings/ai/test-connection', [SettingsController::class, 'testAiConnection'])->name('settings.ai.test');
+    Route::post('/settings/ai/test-embeddings', [SettingsController::class, 'testAiEmbeddings'])->name('settings.ai.test-embeddings');
     Route::get('/settings/email', [SettingsController::class, 'email'])->name('settings.email');
     Route::get('/settings/audit-log', [SettingsController::class, 'auditLog'])->name('settings.audit-log');
     Route::get('/settings/api-keys', [ApiKeyController::class, 'index'])->name('settings.api-keys');
@@ -193,6 +197,15 @@ Route::middleware('auth')->group(function () {
     // ── Reports ───────────────────────────────────────────────────────────────
 
     Route::get('/reports', [ReportsController::class, 'index'])->name('reports.index');
+
+    // ── Agent: import mailbox history (admins) ────────────────────────────────
+
+    Route::get('/agent/import', [ImportHistoryController::class, 'index'])->name('agent.import.index');
+    Route::post('/agent/import', [ImportHistoryController::class, 'store'])->name('agent.import.store');
+    Route::post('/agent/import/{run}/{action}', [ImportHistoryController::class, 'action'])
+        ->whereNumber('run')
+        ->whereIn('action', ['pause', 'resume', 'cancel', 'undo'])
+        ->name('agent.import.action');
 
     // ── AI / Knowledge Base ───────────────────────────────────────────────────
 

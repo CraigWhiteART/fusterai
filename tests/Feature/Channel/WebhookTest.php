@@ -1,7 +1,6 @@
 <?php
 
 use App\Domains\Channel\Jobs\ProcessWebhookMessageJob;
-use App\Domains\Conversation\Jobs\ProcessInboundEmailJob;
 use App\Domains\Conversation\Models\Conversation;
 use App\Domains\Conversation\Models\Thread;
 use App\Domains\Customer\Models\Customer;
@@ -135,31 +134,4 @@ test('threaded webhook reply sets conversation status to open and updates last_r
     $fresh = $conversation->fresh();
     expect($fresh->status->value)->toBe('open');
     expect($fresh->last_reply_at->isToday())->toBeTrue();
-});
-
-// ── (existing test) ───────────────────────────────────────────────────────────
-
-test('duplicate inbound email with same message_id creates only one conversation', function () {
-    // Queue::fake() is already active — child jobs (AI, auto-reply) will be captured,
-    // so we can safely call ->handle() directly without spawning real workers.
-    $emailData = [
-        'message_id' => '<unique-msg-id-123@mail.example.com>',
-        'from_email' => 'customer@example.com',
-        'from_name' => 'Customer',
-        'subject' => 'Help needed',
-        'body_html' => '<p>Hello</p>',
-        'body_text' => 'Hello',
-        'in_reply_to' => null,
-        'references' => null,
-        'attachments' => [],
-        'cc' => [],
-        'headers' => ['auto_submitted' => '', 'x_auto_response_suppress' => '', 'precedence' => '', 'x_fusterai_auto_reply' => ''],
-    ];
-
-    (new ProcessInboundEmailJob($this->mailbox->id, $emailData))->handle();
-    (new ProcessInboundEmailJob($this->mailbox->id, $emailData))->handle();
-
-    expect(
-        Conversation::where('mailbox_id', $this->mailbox->id)->count()
-    )->toBe(1);
 });

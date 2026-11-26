@@ -2,9 +2,12 @@
 
 namespace App\Domains\Conversation\Jobs;
 
+use App\Domains\Agent\AutoSend\AutoSendGuard;
+use App\Domains\Agent\AutoSend\AutoSendService;
 use App\Domains\Channel\Drivers\WhatsAppDriver;
 use App\Domains\Conversation\Models\Conversation;
 use App\Domains\Conversation\Models\Thread;
+use App\Domains\Mailbox\Sync\Threading\ReplyHeaders;
 use App\Enums\ChannelType;
 use App\Events\NewThreadReceived;
 use App\Services\DynamicMailerService;
@@ -17,7 +20,6 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
 class SendReplyJob implements ShouldQueue
@@ -53,6 +55,14 @@ class SendReplyJob implements ShouldQueue
             return;
         }
 
+        // An AI auto-reply is re-checked right before it goes out (kill
+        // switch, mode, playbook, newer messages...); a failed check turns
+        // it back into a draft instead of sending.
+        $autoSend = AutoSendService::isAutoThread($thread);
+        if ($autoSend && ! app(AutoSendGuard::class)->allowsSend($thread)) {
+            return;
+        }
+
         $thread->loadMissing(['user', 'attachments']);
         $conversation = $this->conversation->load(['mailbox', 'customer', 'threads']);
         $mailbox = $conversation->mailbox;
@@ -61,6 +71,9 @@ class SendReplyJob implements ShouldQueue
         // Route to correct channel driver
         if ($conversation->channel_type === ChannelType::WhatsApp) {
             app(WhatsAppDriver::class)->send($thread);
+            if ($autoSend) {
+                app(AutoSendService::class)->markSent($thread);
+            }
             broadcast(new NewThreadReceived($thread));
 
             return;
@@ -80,6 +93,9 @@ class SendReplyJob implements ShouldQueue
 
         // In local env with no SMTP config, fall back to the default mailer (log driver)
         if (! $smtp && app()->environment('local')) {
+            if ($autoSend) {
+                app(AutoSendService::class)->markSent($thread);
+            }
             broadcast(new NewThreadReceived($thread));
 
             return;
@@ -87,28 +103,35 @@ class SendReplyJob implements ShouldQueue
 
         $mailer = $smtp ? app(DynamicMailerService::class)->fromSmtpConfig($smtp) : Mail::mailer('smtp');
 
-        $agentSignature = $thread->user?->signature;
+        // Auto-replies have no user, so they always carry the mailbox signature.
+        $agentSignature = $autoSend ? null : $thread->user?->signature;
 
         // Collect CC recipients from the most recent inbound customer thread
         $ccRecipients = $this->resolveCcRecipients($conversation);
 
-        // Generate a stable per-thread message ID for bounce tracking.
-        // Stored without angle brackets; Symfony IdentificationHeader adds them when serialising.
+        // Per-thread Message-ID (bounce tracking, and how the mail sync
+        // recognises the Sent copy). Kept on the bare "fusterai" host:
+        // ThreadResolver::LEGACY_THREAD and existing customer replies match
+        // "thread-N-...@fusterai". Stored without angle brackets; Symfony's
+        // IdentificationHeader adds them when serialising.
         $outboundMsgId = 'thread-'.$thread->id.'-'.Str::uuid().'@fusterai';
 
-        $trackingToken = Str::random(32);
-        $unsubscribeUrl = URL::signedRoute('unsubscribe', ['customer' => $customer->id]);
+        // Thread under the customer's last real message (falls back to the
+        // legacy <conversation-N@fusterai> without one).
+        $threading = ReplyHeaders::forConversation($conversation);
 
-        // Single update: merge meta (outbound_message_id) + tracking_token together.
-        // Two separate updates would be two round-trips; merging is one.
+        $trackingToken = Str::random(32);
+
+        // Single update: message_id + meta (outbound_message_id) + tracking_token.
         $thread->update([
             'tracking_token' => $trackingToken,
+            'message_id' => $outboundMsgId,
             'meta' => array_merge($thread->meta ?? [], [
                 'outbound_message_id' => "<{$outboundMsgId}>",
             ]),
         ]);
 
-        $mailer->send([], [], function (Message $msg) use ($conversation, $mailbox, $customer, $thread, $agentSignature, $ccRecipients, $outboundMsgId, $unsubscribeUrl, $trackingToken) {
+        $mailer->send([], [], function (Message $msg) use ($conversation, $mailbox, $customer, $thread, $agentSignature, $ccRecipients, $outboundMsgId, $trackingToken, $threading) {
             $msg->to($customer->email, $customer->name)
                 ->from($mailbox->email, $mailbox->name)
                 ->subject($this->buildSubject($conversation))
@@ -119,15 +142,17 @@ class SendReplyJob implements ShouldQueue
                 $msg->cc($cc['email'], $cc['name'] ?? null);
             }
 
-            // Set In-Reply-To header to thread the email
-            $msgId = $this->conversationMessageId($conversation);
             // Message-ID requires Symfony's IdentificationHeader (not plain text)
             $msg->getHeaders()->addIdHeader('Message-ID', $outboundMsgId);
-            $msg->getHeaders()->addTextHeader('In-Reply-To', $msgId);
-            $msg->getHeaders()->addTextHeader('References', $msgId);
+            $msg->getHeaders()->addTextHeader('In-Reply-To', $threading['in_reply_to']);
+            $msg->getHeaders()->addTextHeader('References', $threading['references']);
             $msg->getHeaders()->addTextHeader('X-FusterAI-Conversation', (string) $conversation->id);
-            $msg->getHeaders()->addTextHeader('List-Unsubscribe', "<{$unsubscribeUrl}>, <mailto:{$mailbox->email}?subject=Unsubscribe>");
-            $msg->getHeaders()->addTextHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
+            // Survives a Message-ID rewrite by the SMTP server, so the Sent
+            // copy is still linked to this thread instead of duplicated.
+            $msg->getHeaders()->addTextHeader('X-FusterAI-Thread', (string) $thread->id);
+            // No List-Unsubscribe: this is a 1:1 support reply, not bulk mail.
+            // Gmail's Unsubscribe button would block the customer and route
+            // their future messages to Spam.
 
             // Attach files
             foreach ($thread->attachments as $attachment) {
@@ -145,6 +170,10 @@ class SendReplyJob implements ShouldQueue
         // Clear send_at now that the scheduled message has been sent
         if ($thread->send_at !== null) {
             $thread->update(['send_at' => null]);
+        }
+
+        if ($autoSend) {
+            app(AutoSendService::class)->markSent($thread);
         }
 
         // Broadcast to frontend after send
@@ -178,11 +207,6 @@ class SendReplyJob implements ShouldQueue
             : '';
 
         return $body.$signature.$pixel;
-    }
-
-    private function conversationMessageId(Conversation $conversation): string
-    {
-        return '<conversation-'.$conversation->id.'@fusterai>';
     }
 
     /**

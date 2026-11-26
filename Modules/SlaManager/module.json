@@ -5,6 +5,6 @@
     "version": "1.0.0",
     "hooks": {
         "actions": ["conversation.created", "conversation.updated", "thread.created"],
-        "filters": ["conversation.show.extra", "ai.system_prompt"]
+        "filters": ["conversation.show.extra"]
     }
 }

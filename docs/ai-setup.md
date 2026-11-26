@@ -11,7 +11,7 @@ FusterAI is AI-native — every conversation benefits from automatic reply sugge
 | **Reply Suggestions** | Customer sends a message | Generates a context-aware draft reply using your knowledge base |
 | **Auto-categorization** | New conversation created | Sets tags and priority automatically |
 | **Summarization** | Manual trigger or conversation close | Creates a concise summary of the conversation |
-| **RAG Search** | During reply suggestion | Searches knowledge base via pgvector for relevant context |
+| **RAG Search** | During reply suggestion | Searches the knowledge base by keyword (Postgres full-text search) and, when embeddings are configured, by pgvector similarity |
 | **MCP Server** | External AI agents connect | Exposes helpdesk tools to Claude Desktop and other agents |
 
 All AI features gracefully degrade when no API key is configured — the helpdesk remains fully functional.
@@ -26,9 +26,9 @@ All AI features gracefully degrade when no API key is configured — the helpdes
 2. Go to **API Keys → Create Key**
 3. Copy the key (starts with `sk-ant-`)
 
-Recommended model: `claude-opus-4-6` (default) — best for helpdesk reasoning and reply quality.
+You don't have to pick one model. Each AI role has its own recommended model (see [Models by role](#models-by-role)): `claude-opus-5-5` writes replies, `claude-sonnet-5-5` checks them, `claude-haiku-5-5` handles classification and extraction.
 
-For lower cost and faster responses: `claude-haiku-4-5-20251001`
+Anthropic has no embeddings API. To use semantic search with Anthropic, also add an OpenAI (or OpenAI-compatible) key for embeddings; see [Embeddings](#embeddings).
 
 ### OpenAI (Alternative)
 
@@ -52,15 +52,40 @@ OPENAI_COMPATIBLE_API_KEY=ollama  # or any value
 1. Log in to FusterAI
 2. Go to **Settings → AI Config**
 3. Enter your API key
-4. Select the AI provider and model
-5. Toggle individual features on/off
-6. Click **Save**
+4. Select the AI provider. For Anthropic the default model is optional; for every other provider it is required
+5. Optionally override the model for individual roles
+6. Optionally configure embeddings
+7. Toggle individual features on/off
+8. Click **Save**
 
-Alternatively, set via environment variable (used as fallback if no DB config):
+Alternatively, set the chat key via environment variable (used as fallback if no DB config):
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+### Models by role
+
+Each role resolves its own model. Order: the role's override in Settings → AI Config, then (Anthropic only) the role's recommended model, then the workspace default model. A non-Anthropic provider never receives a `claude-*` ID: with no model configured it gets the provider's own default.
+
+| Role (setting key) | Used for | Recommended on Anthropic |
+|---|---|---|
+| Triage (`triage`) | Classifying each email | `claude-haiku-5-5` |
+| History extraction (`history_extraction`) | Mining past sent replies | `claude-haiku-5-5` |
+| Writer (`writer`) | Drafting the customer reply | `claude-opus-5-5` |
+| Validator (`validator`) | Checking the draft for unsupported claims | `claude-sonnet-5-5` |
+| Simulation judge (`simulation_judge`) | Scoring simulated drafts | `claude-sonnet-5-5` |
+| Manager (`manager`) | Turning feedback into instruction changes | `claude-opus-5-5` |
+| Auto-categorization (`auto_categorization`) | Priority and tags | `claude-haiku-5-5` |
+| Summarization (`summarization`) | Conversation summaries | `claude-haiku-5-5` |
+
+The validator and simulation judge deliberately use a different model from the writer, so a draft is not checked by the model that wrote it.
+
+### Reasoning and thinking
+
+Current Claude models (`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`) think adaptively on every request and reject `temperature`, `top_p`, `top_k` and fixed thinking budgets (`budget_tokens`). FusterAI therefore sends none of these to Anthropic, and the reasoning setting applies only to OpenAI, OpenRouter and OpenAI-compatible providers. Structured output on Anthropic uses `output_config.format` (JSON schema), not a forced tool call, because forced `tool_choice` is rejected by `claude-opus-5-5` and `claude-sonnet-5-5`.
+
+Thinking tokens count toward each agent's `max_tokens`, which is why the limits are higher than the visible output needs.
 
 ---
 
@@ -80,38 +105,46 @@ The knowledge base powers **Retrieval-Augmented Generation (RAG)** — when the 
 2. Add title and content (paste text, import from URL, or upload)
 3. Click **Save**
 
-FusterAI automatically:
-- Splits documents into chunks
-- Generates embeddings via your configured AI provider
-- Stores embeddings in PostgreSQL pgvector
-- Indexes text in MeiliSearch for hybrid search
+FusterAI automatically queues `IndexKbDocumentJob`, which:
+- Embeds the title and the first 8,000 characters of the document with the workspace's embeddings settings (one vector per document; no chunking yet)
+- Stores the vector in PostgreSQL pgvector (`vector(1536)`)
+- Skips the embedding, without failing, when embeddings are not configured. The document is still marked indexed and is found by keyword search
+- Re-chunks the document into the AI agent's knowledge (`agent_knowledge_items`, paragraph-aware chunks of about 1,800 characters with 200 characters of overlap, scoped global), so the agent sees the whole document rather than its opening. Chunks are embedded too when embeddings are configured; deleting the document deletes its chunks
 
-### How RAG works in reply suggestions
+### Embeddings
+
+Embeddings are configured separately from the chat provider in **Settings → AI Config → Embeddings**:
+
+| Field | Notes |
+|---|---|
+| Provider | Not configured, OpenAI, or an OpenAI-compatible endpoint |
+| Model | OpenAI default: `text-embedding-3-small`. Required for OpenAI-compatible |
+| API key | Encrypted like the main key. Left blank with the same provider as the main AI settings, the main key is used |
+| Base URL | OpenAI-compatible only |
+| Dimensions | Fixed at 1536 to match the pgvector columns; vectors of any other size are rejected |
+
+The page shows which source is active: a key saved for embeddings, the main AI key, or the server's `OPENAI_API_KEY`. The environment key is used only when `AI_EMBEDDINGS_ENV_FALLBACK=true`; it is never used silently. **Test embeddings** makes one embedding call and reports the dimensions returned.
+
+Changing the embeddings model does not re-embed existing documents. Re-save documents to re-index them.
+
+### How retrieval works
 
 ```
-Customer message received
+Query (a search term, or the whole customer message)
         ↓
-GenerateReplySuggestionJob dispatched
+Keyword search over every document
+  (Postgres full-text search computed at query time:
+   to_tsvector / plainto_tsquery with OR semantics, ranked by ts_rank)
+        +
+Vector search over documents that have an embedding
+  (pgvector cosine similarity, only when embeddings are configured)
         ↓
-Semantic search on knowledge base
-  (pgvector cosine similarity against message embedding)
+Both rankings merged (reciprocal rank fusion), top-k kept
         ↓
-Top-k relevant document chunks selected
-        ↓
-Chunks injected into Claude system prompt
-        ↓
-Claude generates context-aware draft reply
-        ↓
-Reply streamed to AI Assist panel via Reverb WebSocket
+Results passed to the agent's writer (search_knowledge tool / prefetch)
 ```
 
-### Re-index after bulk imports
-
-If you've added many documents programmatically:
-
-```bash
-php artisan scout:import "App\Domains\AI\Models\KbDocument"
-```
+Documents without an embedding are still found by keyword, so retrieval works with embeddings off or partly indexed. The agent's examples (agent_examples) and knowledge items (agent_knowledge_items, with a stored `tsv` column) are retrieved the same way. The text-search configuration defaults to `english`; set `AI_FTS_CONFIG=simple` to turn off stemming.
 
 ---
 
@@ -124,7 +157,7 @@ AI jobs run in a dedicated Horizon pool for isolation and control:
 | `GenerateReplySuggestionJob` | New customer message | `ai` |
 | `CategorizeConversationJob` | New conversation created | `ai` |
 | `SummarizeConversationJob` | Manual trigger or close | `ai` |
-| `IndexKbDocumentJob` | Knowledge base document saved | `ai` |
+| `IndexKbDocumentJob` | Knowledge base document saved (skips the embedding when embeddings are not configured) | `ai` |
 
 ### Monitor AI jobs
 
@@ -200,60 +233,35 @@ MCP Server:    GET/POST /mcp
 
 ---
 
-## Extending AI with Hooks
+## Extending the agent
 
-Use the module hook system to customize AI behavior:
-
-### Modify the system prompt
-
-```php
-use App\Facades\Hook;
-use App\Domains\Conversation\Models\Conversation;
-
-Hook::filter('ai.system_prompt', function (string $prompt, Conversation $conv) {
-    // Append custom instructions
-    return $prompt . "\n\nAlways respond in English, even if the customer writes in another language.";
-});
-```
-
-### Hook into suggestion generation
-
-```php
-Hook::listen('ai.suggestion_generated', function ($suggestion, Conversation $conv) {
-    // Log, notify, post-process, etc.
-    \Log::info("AI suggestion generated for conversation #{$conv->id}");
-});
-```
-
-### Provide additional context
-
-```php
-Hook::filter('ai.context', function (array $context, Conversation $conv) {
-    // Add custom data to the AI context
-    $context['account_tier'] = $conv->customer->meta['account_tier'] ?? 'free';
-    return $context;
-});
-```
+There are no code hooks into the agent's prompts or drafts (the old
+`ai.system_prompt` / `ai.context` / `ai.generate_reply` filters were removed
+with the legacy drafter). Its instructions are versioned, human-approved
+content that simulations and the regression gate replay exactly; change them
+in Agent → Voice / Playbooks / Knowledge or through proposals
+(docs/agent-proposals.md). Modules can still react to `thread.created`,
+`conversation.*` and add page data with `conversation.show.extra`
+(docs/modules.md).
 
 ---
 
 ## Cost Estimates
 
-Rough token usage per operation (Claude claude-opus-4-6):
+Rough token usage per operation with the recommended models (Opus 5.5 at $4 / $20 per million input / output tokens, Haiku 5.5 at $0.10 / $0.50):
 
-| Operation | Input tokens | Output tokens | ~Cost (claude-opus-4-6) |
-|---|---|---|---|
-| Reply suggestion | ~2,000–5,000 | ~300–500 | ~$0.03–0.08 |
-| Categorization | ~500–1,500 | ~100 | ~$0.007–0.02 |
-| Summarization | ~1,000–8,000 | ~200–400 | ~$0.01–0.10 |
-| KB indexing (embedding) | ~200–2,000 | — | ~$0.001 |
+| Operation | Model | Input tokens | Visible output tokens | ~Cost before thinking |
+|---|---|---|---|---|
+| Agent draft (writer only; triage + validator add a little) | `claude-opus-5-5` | ~2,000–5,000 | ~300–500 | ~$0.014–0.03 |
+| Categorization | `claude-haiku-5-5` | ~500–1,500 | ~100 | under $0.001 |
+| Summarization | `claude-haiku-5-5` | ~1,000–8,000 | ~200–400 | under $0.001 |
+| KB indexing (embedding) | embeddings model | ~200–2,000 | — | under $0.001 |
 
-Estimates vary based on conversation length and knowledge base size. Monitor actual usage in the Anthropic console.
+Thinking tokens are billed as output tokens and come on top of these figures; how many depends on the request. Estimates vary based on conversation length and knowledge base size. Monitor actual usage in the Anthropic console.
 
 **To reduce costs:**
-- Use `claude-haiku-4-5-20251001` for categorization and summarization
-- Use `claude-opus-4-6` only for reply suggestions where quality matters
-- Set model per-feature in Settings → AI Config
+- Keep the cheaper recommended models for triage, categorization, summarization and extraction
+- Override a role's model in Settings → AI Config → Models by role
 
 ---
 

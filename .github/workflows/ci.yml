@@ -93,6 +93,24 @@ jobs:
       - name: Grant CREATEDB to test user
         run: psql -h 127.0.0.1 -U fusterai -d fusterai_test -c "ALTER USER fusterai CREATEDB;"
 
+      # Each parallel Pest worker migrates its own database; RefreshDatabase
+      # then wraps every test in one transaction that touches ~90 tables, which
+      # exhausts the default lock table (64 per connection) on larger suites.
+      # Service containers take no command line, so set it and restart.
+      - name: Raise Postgres lock table size
+        run: |
+          psql -h 127.0.0.1 -U fusterai -d fusterai_test -c "ALTER SYSTEM SET max_locks_per_transaction = 256;"
+          docker restart ${{ job.services.postgres.id }}
+          for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -U fusterai && break; sleep 2; done
+          psql -h 127.0.0.1 -U fusterai -d fusterai_test -c "SHOW max_locks_per_transaction;"
+
+      # pgvector (embedding columns) and Postgres full-text search (the
+      # tsv columns / retriever) are both required by the migrations and tests.
+      - name: Check pgvector and full-text search
+        run: |
+          psql -h 127.0.0.1 -U fusterai -d fusterai_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          psql -h 127.0.0.1 -U fusterai -d fusterai_test -c "SELECT to_tsvector('english', 'parcel delayed') @@ plainto_tsquery('english', 'delay');"
+
       - name: Configure test environment
         run: |
           php artisan key:generate
@@ -111,8 +129,11 @@ jobs:
       - name: Check PHP code style
         run: ./vendor/bin/pint --test
 
+      # Explicit process count: the default (one per CPU) is fine on hosted
+      # runners, but on a large self-hosted box 32 workers x the suite's lock
+      # use exhausted Postgres' shared lock table.
       - name: Run Pest tests
-        run: ./vendor/bin/pest --parallel --ci
+        run: ./vendor/bin/pest --parallel --processes=4 --ci
 
   phpstan:
     name: PHPStan Static Analysis
@@ -143,4 +164,4 @@ jobs:
         run: cp .env.example .env && php artisan key:generate
 
       - name: Run PHPStan
-        run: ./vendor/bin/phpstan analyse --memory-limit=512M --no-progress
+        run: ./vendor/bin/phpstan analyse --memory-limit=2G --no-progress

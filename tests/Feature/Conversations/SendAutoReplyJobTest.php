@@ -6,6 +6,7 @@ use App\Domains\Conversation\Models\Thread;
 use App\Domains\Customer\Models\Customer;
 use App\Domains\Mailbox\Models\Mailbox;
 use App\Models\Workspace;
+use Illuminate\Mail\MailManager;
 use Illuminate\Mail\SendQueuedMailable;
 use Illuminate\Support\Facades\Mail;
 
@@ -112,4 +113,28 @@ test('auto-reply job skips when customer has no email', function () {
     (new SendAutoReplyJob($conversation))->handle();
 
     expect(Thread::where('conversation_id', $conversation->id)->where('type', 'activity')->count())->toBe(0);
+});
+
+test('auto-reply does not add List-Unsubscribe headers', function () {
+    // Swap the fake for a real manager on the array transport so the built
+    // message's headers can be inspected.
+    config(['mail.default' => 'array']);
+    Mail::swap($manager = new MailManager(app()));
+
+    $mailbox = mailboxWithAutoReply($this->workspace->id);
+    $conversation = Conversation::factory()->create([
+        'workspace_id' => $this->workspace->id,
+        'mailbox_id' => $mailbox->id,
+        'customer_id' => $this->customer->id,
+    ]);
+
+    (new SendAutoReplyJob($conversation))->handle();
+
+    $sent = $manager->mailer('array')->getSymfonyTransport()->messages();
+    expect($sent)->toHaveCount(1);
+
+    $headers = $sent->first()->getOriginalMessage()->getHeaders();
+    expect($headers->has('List-Unsubscribe'))->toBeFalse()
+        ->and($headers->has('List-Unsubscribe-Post'))->toBeFalse()
+        ->and($headers->has('X-FusterAI-AutoReply'))->toBeTrue();
 });

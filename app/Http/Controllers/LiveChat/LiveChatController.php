@@ -34,7 +34,10 @@ class LiveChatController extends Controller
         // Ensure conversation belongs to agent's workspace
         abort_unless($conversation->workspace_id === $request->user()->workspace_id, 403);
 
-        broadcast(new AgentTyping($conversation->id, $request->user()->name))->toOthers();
+        $chatChannel = $conversation->chatChannelName();
+        if ($chatChannel !== null) {
+            broadcast(new AgentTyping($conversation->id, $request->user()->name, $chatChannel))->toOthers();
+        }
 
         return response()->json(['ok' => true]);
     }

@@ -29,7 +29,6 @@
         "meilisearch/meilisearch-php": "^1.16",
         "predis/predis": "^3.4",
         "spatie/laravel-activitylog": "^4.12",
-        "spatie/laravel-permission": "^7.2",
         "tightenco/ziggy": "^2.6",
         "webklex/php-imap": "^6.2"
     },

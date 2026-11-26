@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * @property array<int, float>|null $embedding
+ * @property array<int, float>|string|null $embedding pgvector text form ('[0.1,...]') when written by the indexer
  */
 class KbDocument extends Model
 {

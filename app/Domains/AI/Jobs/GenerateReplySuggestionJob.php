@@ -2,83 +2,98 @@
 
 namespace App\Domains\AI\Jobs;
 
-use App\Ai\Agents\ReplySuggestionAgent;
-use App\Domains\Conversation\Models\AiSuggestion;
+use App\Domains\Agent\Models\AgentRun;
+use App\Domains\Agent\Models\AgentSetting;
+use App\Domains\Agent\Pipeline\AgentPipeline;
+use App\Domains\Agent\Pipeline\PipelineInput;
 use App\Domains\Conversation\Models\Conversation;
 use App\Events\AiSuggestionFailed;
-use App\Events\AiSuggestionReady;
-use App\Services\AiSettingsService;
-use App\Support\Hooks;
-use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
+/**
+ * Drafts a reply for the latest customer message with the agent pipeline
+ * (AgentPipeline writes the AiSuggestion and broadcasts AiSuggestionReady /
+ * AiSuggestionFailed with the run id).
+ *
+ * agent_settings.mode decides what happens on its own (inbound mail, chat):
+ *   draft / live  a live run (the visible draft; live may auto-send)
+ *   shadow        a shadow run only (recorded, nobody sees anything)
+ *   off           nothing
+ *
+ * A person clicking "AI Suggest" (`manual: true`, POST /ai/conversations/{id}/suggest-reply)
+ * always gets a one-off live draft, also when the agent is off or in shadow:
+ * a person is present and asked for it. It is never auto-sent (the gate's
+ * `requested_by_human` blocker) and nothing runs unattended outside `live`.
+ * With the kill switch on, nothing runs and the reason is broadcast.
+ *
+ * Safe to retry: a live run is keyed by conversation + latest customer
+ * thread + config hash, so a second dispatch (or a retry after a crash)
+ * reuses the completed run instead of drafting again; an explicit regenerate
+ * or manual request carries its own token, stable across retries of the job.
+ */
 class GenerateReplySuggestionJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
-    public int $timeout = 120;
+    /** Below the `ai` Horizon supervisor's 330s timeout (config/horizon.php). */
+    public int $timeout = 300;
+
+    /** @var list<int> */
+    public array $backoff = [15, 60];
+
+    /** Set for an explicit regenerate / manual request: makes a new run, stable across retries of this job. */
+    public readonly ?string $regenerateToken;
 
     public function __construct(
         public readonly Conversation $conversation,
+        bool $regenerate = false,
+        public readonly bool $manual = false,
     ) {
+        $this->regenerateToken = $regenerate || $manual ? (string) Str::uuid7() : null;
         $this->onQueue('ai');
     }
 
     public function handle(): void
     {
-        $conversation = $this->conversation->load(['customer', 'mailbox', 'threads' => fn ($q) => $q->latest()->limit(10)]);
+        $settings = AgentSetting::forWorkspace((int) $this->conversation->workspace_id);
+        $conversation = $this->conversation->fresh() ?? $this->conversation;
 
-        try {
-            $handled = Hooks::applyFilters('ai.generate_reply', false, $conversation);
-            if ($handled === true) {
+        if ($settings->pipelineOwnsDrafts() || $this->manual) {
+            if ($settings->kill_switch) {
+                if ($this->manual) {
+                    broadcast(new AiSuggestionFailed($conversation->id, 'The AI agent kill switch is on, so it cannot draft. Turn it off in Agent settings.'));
+                }
+
                 return;
             }
-        } catch (\Throwable $e) {
-            Log::warning('ai.generate_reply filter failed; using default reply agent', [
-                'conversation_id' => $conversation->id,
-                'error' => $e->getMessage(),
-            ]);
+
+            app(AgentPipeline::class)->run(
+                PipelineInput::fromConversation(
+                    $conversation,
+                    AgentRun::PURPOSE_LIVE,
+                    force: $this->regenerateToken !== null,
+                    manual: $this->manual && ! $settings->pipelineOwnsDrafts(),
+                ),
+                idempotencyKey: $this->regenerateToken !== null ? 'live:regen:'.$this->regenerateToken : null,
+            );
+
+            return;
         }
 
-        try {
-            app(AiSettingsService::class)->withWorkspaceCredentials(
-                $conversation->workspace_id,
-                function ($lab, $model, $providerOptions = []) use ($conversation): void {
-                    $agent = (new ReplySuggestionAgent($conversation))->withProviderOptions($providerOptions);
-                    $prompt = 'Please suggest a helpful, professional reply to the latest customer message. Write only the reply body.';
-
-                    $channel = new PrivateChannel("conversation.{$conversation->id}");
-
-                    $stream = $agent->broadcast($prompt, $channel, provider: $lab, model: $model);
-
-                    $content = $stream->text ?? '';
-
-                    $suggestion = AiSuggestion::create([
-                        'conversation_id' => $conversation->id,
-                        'type' => 'reply',
-                        'content' => $content,
-                        'model' => $model ?? $lab->value,
-                        'prompt_tokens' => $stream->usage->promptTokens ?? 0,
-                        'completion_tokens' => $stream->usage->completionTokens ?? 0,
-                    ]);
-
-                    broadcast(new AiSuggestionReady($conversation->id, $content, $suggestion->id));
-                },
-                task: 'reply_suggestions',
-            );
-        } catch (\Throwable $e) {
-            Log::error('GenerateReplySuggestionJob failed', [
-                'conversation_id' => $conversation->id,
-                'error' => $e->getMessage(),
-            ]);
-            $this->fail($e);
+        if ($settings->mode === AgentSetting::MODE_SHADOW) {
+            try {
+                app(AgentPipeline::class)->run(PipelineInput::fromConversation($conversation, AgentRun::PURPOSE_SHADOW));
+            } catch (\Throwable $e) {
+                Log::warning('Agent shadow run failed', ['conversation_id' => $conversation->id, 'error' => $e->getMessage()]);
+            }
         }
     }
 

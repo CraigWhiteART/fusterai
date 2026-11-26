@@ -1,0 +1,29 @@
+Delivered-To: support@souldial.test
+Return-Path: <emma.clarke@example.net>
+MIME-Version: 1.0
+Date: Mon, 3 Nov 2025 09:15:00 +0000
+Message-ID: <CAEmma001.k3j2@mail.gmail.com>
+Subject: Where is my order #1042?
+From: Emma Clarke <emma.clarke@example.net>
+To: Soul Dial Support <support@souldial.test>
+Content-Type: multipart/alternative; boundary="000000000000a1b2c3"
+
+--000000000000a1b2c3
+Content-Type: text/plain; charset="UTF-8"
+
+Hi there,
+
+On Friday I ordered the walnut dial lamp (order #1042) and the tracking
+page has not moved since Saturday.
+
+Could you check where it is? I need it before the 12th.
+
+Thanks,
+Emma
+
+--000000000000a1b2c3
+Content-Type: text/html; charset="UTF-8"
+
+<div dir="ltr">Hi there,<div><br></div><div>On Friday I ordered the walnut dial lamp (order #1042) and the tracking page has not moved since Saturday.</div><div><br></div><div>Could you check where it is? I need it before the 12th.</div><div><br></div><div>Thanks,</div><div>Emma</div></div>
+
+--000000000000a1b2c3--

@@ -43,10 +43,5 @@ class SatisfactionSurveyServiceProvider extends ServiceProvider
 
             return $extra;
         });
-
-        // ── Filter: note AI about survey ──────────────────────────────────────
-        Hooks::addFilter('ai.system_prompt', function (string $prompt) {
-            return $prompt."\n\nNote: A satisfaction survey (👍/👎) will be emailed to the customer automatically when this conversation is closed.";
-        });
     }
 }

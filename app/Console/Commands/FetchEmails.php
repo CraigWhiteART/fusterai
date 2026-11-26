@@ -2,30 +2,41 @@
 
 namespace App\Console\Commands;
 
-use App\Domains\Conversation\Jobs\ProcessInboundEmailJob;
-use App\Domains\Mailbox\Models\ImapProcessedUid;
 use App\Domains\Mailbox\Models\Mailbox;
-use App\Domains\Mailbox\Support\ImapInboundMessage;
+use App\Domains\Mailbox\Sync\Jobs\IngestMailMessageJob;
+use App\Domains\Mailbox\Sync\MailSyncLock;
+use App\Domains\Mailbox\Sync\MailSyncService;
+use App\Domains\Mailbox\Sync\Models\MailMessage;
+use App\Domains\Mailbox\Sync\Models\MailSyncState;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
-use Webklex\PHPIMAP\Client;
-use Webklex\PHPIMAP\ClientManager;
+use Throwable;
 
+/**
+ * Copies new mail (inbound and staff mail sent from Gmail) from every active
+ * IMAP mailbox into the mail_messages ledger with MailSyncService::syncNew(),
+ * then queues one IngestMailMessageJob per new row. Read-only on the server:
+ * nothing is marked read, moved or flagged (see docs/mail-sync.md).
+ */
 class FetchEmails extends Command
 {
     protected $signature = 'emails:fetch
                             {--mailbox=* : Specific mailbox IDs to fetch}
-                            {--limit=15 : Max unseen messages to process per mailbox}';
+                            {--limit= : Max message bodies to download per folder per run}';
 
-    protected $description = 'Fetch new emails from all active IMAP mailboxes';
+    protected $description = 'Sync new mail from all active IMAP mailboxes into the mail ledger and queue it for ingest';
 
-    private const MAX_MESSAGE_BYTES = 8_388_608;
+    /** Per-mailbox lock; longer than any sane run, released as soon as the run ends. */
+    private const LOCK_SECONDS = MailSyncLock::SECONDS;
 
-    public function handle(): int
+    /** Live rows older than this are not re-dispatched by the sweep (gave up / needs a human). */
+    private const REINGEST_MAX_AGE_HOURS = 48;
+
+    public function handle(MailSyncService $sync): int
     {
         ini_set('memory_limit', '512M');
 
-        $query = Mailbox::where('active', true)->whereNotNull('imap_config');
+        $query = Mailbox::where('active', true)->whereNotNull('imap_config')->orderBy('id');
 
         if ($ids = $this->option('mailbox')) {
             $query->whereIn('id', $ids);
@@ -36,17 +47,38 @@ class FetchEmails extends Command
         if ($mailboxes->isEmpty()) {
             $this->info('No active IMAP mailboxes found.');
 
-            return 0;
+            return self::SUCCESS;
         }
 
+        $sync->configure(
+            initialLookbackDays: (int) config('mailsync.initial_lookback_days', 3),
+            maxBodiesPerRun: $this->option('limit') !== null
+                ? max(1, (int) $this->option('limit'))
+                : (int) config('mailsync.max_bodies_per_run', 200),
+        );
+
+        $failed = 0;
         foreach ($mailboxes as $mailbox) {
-            $this->fetchForMailbox($mailbox);
+            // One mailbox failing (bad password, server down) never stops the others.
+            try {
+                if (! $this->syncMailbox($sync, $mailbox)) {
+                    continue;
+                }
+            } catch (Throwable $e) {
+                $failed++;
+                $this->error("  Error syncing {$mailbox->email}: ".$e->getMessage());
+                Log::error('FetchEmails failed', [
+                    'mailbox_id' => $mailbox->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
-        return 0;
+        return $failed > 0 ? self::FAILURE : self::SUCCESS;
     }
 
-    private function fetchForMailbox(Mailbox $mailbox): void
+    /** False when the mailbox was skipped. */
+    private function syncMailbox(MailSyncService $sync, Mailbox $mailbox): bool
     {
         $config = $mailbox->imap_config;
         if (! $config || empty($config['host']) || empty($config['username'])) {
@@ -55,121 +87,73 @@ class FetchEmails extends Command
                 'mailbox_id' => $mailbox->id,
             ]);
 
-            return;
+            return false;
         }
 
-        $this->info("Fetching: {$mailbox->name} <{$mailbox->email}>");
+        // The scheduler uses withoutOverlapping() for the whole command; this
+        // also covers a manual `emails:fetch --mailbox=N` during a scheduled run,
+        // and a history backfill's metadata sweep (it holds the same lock for a
+        // few seconds per slice, so live mail waits at most one run).
+        $lock = MailSyncLock::for($mailbox->id, self::LOCK_SECONDS);
+        if (! $lock->get()) {
+            $this->warn("  Skipping {$mailbox->email}: another sync is running.");
+
+            return false;
+        }
 
         try {
-            $cm = new ClientManager;
+            $this->info("Syncing: {$mailbox->name} <{$mailbox->email}>");
 
-            $client = $cm->make([
-                'host' => $config['host'],
-                'port' => $config['port'] ?? 993,
-                'encryption' => $config['encryption'] ?? 'ssl',
-                'validate_cert' => $config['validate_cert'] ?? true,
-                'username' => $config['username'],
-                'password' => $this->normalizePassword((string) ($config['password'] ?? '')),
-                'protocol' => 'imap',
-            ]);
+            $report = $sync->syncNew($mailbox);
 
-            $client->connect();
-
-            $folder = $client->getFolder('INBOX');
-            // BODY.PEEK: download without setting \Seen (Gmail "read").
-            $uids = $folder->query()->leaveUnread()->unseen()->search();
-            $limit = max(1, (int) $this->option('limit'));
-            $batch = ImapProcessedUid::pending($mailbox->id, $uids, $limit);
-
-            $this->info("  {$uids->count()} unseen; processing {$batch->count()} (newest first).");
-
-            foreach ($batch as $uid) {
-                $this->processUid($client, $mailbox, (int) $uid);
+            foreach ($report->newMessageIds as $id) {
+                IngestMailMessageJob::dispatch($id);
             }
 
-            $client->disconnect();
-        } catch (\Throwable $e) {
-            $this->error("  Error fetching {$mailbox->email}: ".$e->getMessage());
-            Log::error('FetchEmails failed', [
-                'mailbox_id' => $mailbox->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
+            $requeued = $this->requeueStranded($mailbox);
 
-    private function processUid(Client $client, Mailbox $mailbox, int $uid): void
-    {
-        try {
-            $size = $this->rfc822Size($client, $uid);
-            if ($size > self::MAX_MESSAGE_BYTES) {
-                $this->warn("  Skipping UID {$uid}: {$size} bytes exceeds limit.");
-                ImapProcessedUid::remember($mailbox->id, $uid);
-                Log::warning('FetchEmails skipped oversized message', [
-                    'mailbox_id' => $mailbox->id,
-                    'uid' => $uid,
-                    'size' => $size,
-                ]);
-
-                return;
+            $this->info("  {$report->inserted} new, {$report->bodiesFetched} bodies, {$requeued} re-queued.");
+            if ($report->uidValidityResets !== []) {
+                $this->warn('  UIDVALIDITY changed: '.implode(', ', $report->uidValidityResets));
             }
-
-            $message = $client->getFolder('INBOX')->query()->leaveUnread()->getMessageByUid($uid);
-
-            ProcessInboundEmailJob::dispatch(
-                $mailbox->id,
-                ImapInboundMessage::toPayload($message),
-            )->onQueue('email-inbound');
-
-            // Track locally. Do not set \Seen — that marks the message read in Gmail.
-            ImapProcessedUid::remember($mailbox->id, $uid);
-        } catch (\Throwable $e) {
-            $this->error("  UID {$uid}: ".$e->getMessage());
-            Log::error('FetchEmails message failed', [
-                'mailbox_id' => $mailbox->id,
-                'uid' => $uid,
-                'error' => $e->getMessage(),
-            ]);
+        } finally {
+            $lock->release();
         }
+
+        return true;
     }
 
-    private function rfc822Size(Client $client, int $uid): int
+    /**
+     * Live rows that never got an ingest result (the process died between
+     * the ledger commit and the dispatch, or the job was lost) are queued
+     * again. Only live rows (UID at or above the folder's live_from_uid), so
+     * backfilled history is never ingested as live mail.
+     */
+    private function requeueStranded(Mailbox $mailbox): int
     {
-        $raw = $client->getConnection()->sizes($uid)->validatedData();
+        $count = 0;
+        $olderThan = now()->subMinutes(max(1, (int) config('mailsync.reingest_after_minutes', 10)));
 
-        if (is_numeric($raw)) {
-            return (int) $raw;
-        }
+        foreach (MailSyncState::where('mailbox_id', $mailbox->id)->whereNotNull('live_from_uid')->get() as $state) {
+            $ids = MailMessage::query()
+                ->where('mailbox_id', $mailbox->id)
+                ->where('folder', $state->folder)
+                ->where('uidvalidity', $state->uidvalidity)
+                ->where('uid', '>=', $state->live_from_uid)
+                ->whereNull('ingested_at')
+                ->whereNull('thread_id')
+                ->where('created_at', '<=', $olderThan)
+                ->where('created_at', '>=', now()->subHours(self::REINGEST_MAX_AGE_HOURS))
+                ->orderBy('id')
+                ->limit(100)
+                ->pluck('id');
 
-        if (! is_array($raw)) {
-            return 0;
-        }
-
-        $entry = $raw[$uid] ?? $raw[(string) $uid] ?? $raw[0] ?? $raw;
-
-        if (is_numeric($entry)) {
-            return (int) $entry;
-        }
-
-        if (is_array($entry)) {
-            foreach (['RFC822.SIZE', 'rfc822.size', 'SIZE', 'size'] as $key) {
-                if (isset($entry[$key]) && is_numeric($entry[$key])) {
-                    return (int) $entry[$key];
-                }
+            foreach ($ids as $id) {
+                IngestMailMessageJob::dispatch((int) $id);
+                $count++;
             }
         }
 
-        return 0;
-    }
-
-    private function normalizePassword(string $password): string
-    {
-        $stripped = str_replace(' ', '', $password);
-
-        // Gmail app passwords are 16 letters, often copied with spaces.
-        if (preg_match('/^[a-z]{16}$/i', $stripped)) {
-            return $stripped;
-        }
-
-        return $password;
+        return $count;
     }
 }

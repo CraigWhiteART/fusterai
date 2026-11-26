@@ -2,15 +2,14 @@
 
 namespace App\Domains\AI\Jobs;
 
+use App\Ai\EmbeddingService;
+use App\Domains\Agent\Services\KbKnowledgeSync;
 use App\Domains\AI\Models\KbDocument;
-use App\Services\AiSettingsService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Laravel\Ai\Embeddings;
-use Laravel\Ai\Enums\Lab;
 
 class IndexKbDocumentJob implements ShouldQueue
 {
@@ -28,26 +27,34 @@ class IndexKbDocumentJob implements ShouldQueue
 
     public function handle(): void
     {
-        $text = $this->document->title."\n\n".$this->document->content;
-        $text = mb_substr($text, 0, 8000);
-
-        app(AiSettingsService::class)->withWorkspaceCredentials(
-            $this->document->knowledgeBase->workspace_id,
-            function (Lab $lab) use ($text): void {
-                // Anthropic does not provide an embeddings API; fall back to OpenAI.
-                $embeddingsLab = ($lab === Lab::Anthropic) ? Lab::OpenAI : $lab;
-
-                $response = Embeddings::for([$text])->generate($embeddingsLab);
-
-                $this->document->embedding = $response->first();
-                $this->document->indexed_at = now();
-            }
-        );
-
-        // Clear any previous index error
+        $embeddings = app(EmbeddingService::class);
+        $workspaceId = $this->document->knowledgeBase->workspace_id;
         $meta = $this->document->meta ?? [];
         unset($meta['index_error']);
+
+        // Keep the agent's chunked copy of this document in step (embeds the
+        // changed chunks too when embeddings are configured).
+        app(KbKnowledgeSync::class)->sync($this->document);
+
+        // No embeddings configured: the document stays searchable by keyword.
+        // Record why it has no vector instead of failing the job.
+        if (! $embeddings->isConfigured($workspaceId)) {
+            $meta['embedding_skipped'] = 'Embeddings are not configured';
+            $this->document->meta = $meta;
+            $this->document->embedding = null;
+            $this->document->indexed_at = now();
+            $this->document->save();
+
+            return;
+        }
+
+        $text = mb_substr($this->document->title."\n\n".$this->document->content, 0, 8000);
+        $vector = $embeddings->embed($workspaceId, [$text])[0];
+
+        unset($meta['embedding_skipped']);
         $this->document->meta = $meta;
+        $this->document->embedding = EmbeddingService::toColumn($vector);
+        $this->document->indexed_at = now();
         $this->document->save();
     }
 

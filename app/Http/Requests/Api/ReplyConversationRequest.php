@@ -16,6 +16,7 @@ class ReplyConversationRequest extends FormRequest
         return [
             'body' => ['required', 'string'],
             'type' => ['nullable', 'in:message,note'],
+            'send_anyway' => ['nullable', 'boolean'],
         ];
     }
 }

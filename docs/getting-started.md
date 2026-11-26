@@ -184,15 +184,18 @@ Embed a real-time chat widget on your website:
 
 ```html
 <script>
-  window.FusterAIConfig = {
-    workspaceId: 'your-workspace-id',
-    serverUrl: 'https://your-fusterai.com'
+  window.FusterAIChat = {
+    workspaceId: 1,
+    wsKey:   'your-reverb-app-key',
+    wsHost:  'your-fusterai.com',
+    wsPort:  8080,
+    apiBase: 'https://your-fusterai.com'
   };
 </script>
 <script src="https://your-fusterai.com/livechat/widget.js" async></script>
 ```
 
-Chat messages appear in the **Live Chat** section of the sidebar in real-time.
+Chat messages appear in the **Live Chat** section of the sidebar in real-time. Each chat gets a random token and the widget listens on `livechat.{token}`, so one visitor cannot subscribe to another visitor's chat.
 
 ---
 

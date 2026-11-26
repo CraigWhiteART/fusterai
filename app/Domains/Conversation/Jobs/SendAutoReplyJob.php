@@ -3,6 +3,7 @@
 namespace App\Domains\Conversation\Jobs;
 
 use App\Domains\Conversation\Models\Conversation;
+use App\Domains\Mailbox\Sync\Threading\ReplyHeaders;
 use App\Services\DynamicMailerService;
 use App\Services\OfficeHoursService;
 use Illuminate\Bus\Queueable;
@@ -12,7 +13,6 @@ use Illuminate\Mail\Message;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\URL;
 
 class SendAutoReplyJob implements ShouldQueue
 {
@@ -60,18 +60,26 @@ class SendAutoReplyJob implements ShouldQueue
         $smtp = $mailbox->smtp_config;
         $mailer = $smtp ? app(DynamicMailerService::class)->fromSmtpConfig($smtp) : Mail::mailer();
 
-        $unsubscribeUrl = URL::signedRoute('unsubscribe', ['customer' => $customer->id]);
+        $threading = ReplyHeaders::forConversation($conversation);
 
-        $mailer->send([], [], function (Message $msg) use ($conversation, $mailbox, $customer, $subject, $body, $unsubscribeUrl) {
+        $mailer->send([], [], function (Message $msg) use ($conversation, $mailbox, $customer, $subject, $body, $threading) {
             $msg->to($customer->email, $customer->name)
                 ->from($mailbox->email, $mailbox->name)
                 ->subject($subject)
                 ->text($body);
 
-            $msg->getHeaders()->addIdHeader('Message-ID', 'conversation-'.$conversation->id.'@fusterai');
+            // conversation-N@fusterai: a customer replying to the auto-reply
+            // lands back in this conversation (ThreadResolver legacy match).
+            $msg->getHeaders()->addIdHeader('Message-ID', ReplyHeaders::legacyConversationId($conversation->id));
+            if ($threading['parent'] !== null) {
+                $msg->getHeaders()->addTextHeader('In-Reply-To', $threading['in_reply_to']);
+                $msg->getHeaders()->addTextHeader('References', $threading['references']);
+            }
+            $msg->getHeaders()->addTextHeader('X-FusterAI-Conversation', (string) $conversation->id);
             $msg->getHeaders()->addTextHeader('X-FusterAI-AutoReply', '1');
-            $msg->getHeaders()->addTextHeader('List-Unsubscribe', "<{$unsubscribeUrl}>, <mailto:{$mailbox->email}?subject=Unsubscribe>");
-            $msg->getHeaders()->addTextHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
+            $msg->getHeaders()->addTextHeader('Auto-Submitted', 'auto-replied');
+            // No List-Unsubscribe: an acknowledgement of a support request is not
+            // bulk mail, and Gmail's Unsubscribe button would block the customer.
         });
 
         // Log so agents can see the auto-reply was sent

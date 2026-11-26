@@ -1,0 +1,53 @@
+MIME-Version: 1.0
+Date: Wed, 5 Nov 2025 09:12:44 +0000
+References: <CAEmma001.k3j2@mail.gmail.com> <CAAgent002.q9w8@mail.gmail.com>
+ <CAEmma003.z7x6@mail.gmail.com>
+In-Reply-To: <CAEmma003.z7x6@mail.gmail.com>
+Message-ID: <CAEmma004.p5o4@mail.gmail.com>
+Subject: Re: Where is my order #1042?
+From: Emma Clarke <emma.clarke@example.net>
+To: Soul Dial Support <support@souldial.test>
+Cc: "Clarke, Tom" <tom.clarke@example.net>
+Content-Type: multipart/mixed; boundary="mixed_7a"
+
+--mixed_7a
+Content-Type: multipart/related; boundary="related_7b"
+
+--related_7b
+Content-Type: multipart/alternative; boundary="alt_7c"
+
+--alt_7c
+Content-Type: text/plain; charset="UTF-8"
+
+Here is the photo of the cracked shade, and the invoice is attached.
+
+[image: shade.png]
+
+Emma
+
+--alt_7c
+Content-Type: text/html; charset="UTF-8"
+
+<div dir="ltr"><div>Here is the photo of the cracked shade, and the invoice is attached.</div><div><img src="cid:ii_shade01" alt="shade.png" width="320"><br></div><div>Emma</div></div>
+
+--alt_7c--
+
+--related_7b
+Content-Type: image/png; name="shade.png"
+Content-Disposition: inline; filename="shade.png"
+Content-Transfer-Encoding: base64
+Content-ID: <ii_shade01>
+X-Attachment-Id: ii_shade01
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+
+--related_7b--
+
+--mixed_7a
+Content-Type: application/pdf; name="invoice-1042.pdf"
+Content-Disposition: attachment; filename="invoice-1042.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJcOkw7zDtsOfCjEgMCBvYmoKPDwvVHlwZS9DYXRhbG9nPj4KZW5kb2JqCnRyYWlsZXIKPDwvUm9vdCAxIDAgUj4+CiUlRU9GCg==
+
+--mixed_7a--
