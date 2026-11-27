@@ -567,7 +567,7 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
                         mobileOpen && 'flex fixed inset-y-0 left-0 z-50 w-72 md:relative md:inset-auto md:z-auto',
                     )}
                 >
-                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_0%,hsl(var(--primary)/0.2),transparent_40%)]" />
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_0%,color-mix(in_oklch,var(--primary)_20%,transparent),transparent_40%)]" />
                     <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/20 dark:bg-black/20" />
                     {/* Logo + toggle */}
                     <div className="relative z-10 flex h-16 items-center justify-between px-3.5 border-b border-border/60 shrink-0">

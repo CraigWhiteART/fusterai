@@ -140,17 +140,17 @@ export default function ReportsIndex({ stats, days }: Props) {
                                             <stop offset="95%" stopColor="var(--color-count)" stopOpacity={0.02} />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                                     <XAxis
                                         dataKey="date"
-                                        tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                                        tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
                                         tickLine={false}
                                         axisLine={false}
                                         interval="preserveStartEnd"
                                     />
                                     <YAxis
                                         allowDecimals={false}
-                                        tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                                        tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
                                         tickLine={false}
                                         axisLine={false}
                                     />
