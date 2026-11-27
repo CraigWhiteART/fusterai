@@ -105,8 +105,8 @@ export default function NewConversationModal({ mailboxes, onClose }: { mailboxes
                             {selectedCustomer ? (
                                 <div className="flex items-center justify-between border border-input rounded-md px-3 py-2 bg-muted/30">
                                     <div>
-                                        <span className="text-sm font-medium">{selectedCustomer.name}</span>
-                                        <span className="text-xs text-muted-foreground ml-2">{selectedCustomer.email}</span>
+                                        <span className="text-sm font-medium">{selectedCustomer.name}</span>{' '}
+                                        <span className="text-xs text-muted-foreground ml-1">{selectedCustomer.email}</span>
                                     </div>
                                     <button
                                         type="button"
@@ -141,8 +141,8 @@ export default function NewConversationModal({ mailboxes, onClose }: { mailboxes
                                                     }}
                                                     className="w-full text-left px-3 py-2 hover:bg-muted/60 transition-colors"
                                                 >
-                                                    <span className="text-sm font-medium">{c.name}</span>
-                                                    <span className="text-xs text-muted-foreground ml-2">{c.email}</span>
+                                                    <span className="text-sm font-medium">{c.name}</span>{' '}
+                                                    <span className="text-xs text-muted-foreground ml-1">{c.email}</span>
                                                 </button>
                                             ))}
                                         </div>

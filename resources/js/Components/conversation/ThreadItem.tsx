@@ -133,8 +133,12 @@ export function EmailThreadItem({ thread, conversation, commerceAssist, onCancel
                     </Avatar>
                     <div className="min-w-0">
                         <span className="font-semibold text-[13px] text-foreground">{name}</span>
+                        {/* A real space, not just margin: otherwise the text reads "Huberckhuber…" as one word. */}
                         {isFromCustomer && thread.customer?.email && (
-                            <span className="text-[11px] text-muted-foreground/70 ml-2">{thread.customer.email}</span>
+                            <>
+                                {' '}
+                                <span className="ml-1 text-[11px] text-muted-foreground/70">{thread.customer.email}</span>
+                            </>
                         )}
                     </div>
                 </div>
