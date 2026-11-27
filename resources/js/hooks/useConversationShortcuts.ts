@@ -1,6 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { router } from '@inertiajs/react';
 
+/** Ctrl/Cmd/Alt combos (copy, reload, browser and app shortcuts) are never single-key shortcuts. */
+function hasModifier(e: KeyboardEvent): boolean {
+    return e.ctrlKey || e.metaKey || e.altKey;
+}
+
+/** Enter on a focused button or link must keep activating it. */
+function isInteractive(target: HTMLElement): boolean {
+    return !!target.closest('button, a, [role="button"], [role="menuitem"], [role="option"], [role="tab"], summary');
+}
+
 type ShortcutOpts = {
     conversationId: number;
     status: string;
@@ -35,6 +45,7 @@ export function useConversationShortcuts(opts: ShortcutOpts) {
             if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable) {
                 return;
             }
+            if (hasModifier(e)) return;
 
             const { onFocusReply, onFocusNote, onClose, status } = optsRef.current;
 
@@ -81,9 +92,16 @@ export function useConversationListShortcuts(opts: ListShortcutOpts) {
     useEffect(() => {
         function handler(e: KeyboardEvent) {
             const target = e.target as HTMLElement;
-            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+            if (
+                target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.tagName === 'SELECT' ||
+                target.isContentEditable ||
+                hasModifier(e)
+            ) {
                 return;
             }
+            if (e.key === 'Enter' && isInteractive(target)) return;
 
             const { conversationIds, currentId, onSelect } = optsRef.current;
             if (conversationIds.length === 0) return;
