@@ -112,7 +112,7 @@ export default function TeachFromEdit({
     }
 
     return (
-        <div className="px-4 pt-3">
+        <div>
             <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5">
                 <div className="flex items-start gap-2">
                     <GraduationCapIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />

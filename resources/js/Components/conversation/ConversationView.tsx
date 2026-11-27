@@ -275,39 +275,43 @@ export default function ConversationView({
                     visitorTyping={visitorTyping}
                     onCancelSchedule={cancelSchedule}
                     threadBadges={isAdmin ? qa.badges : undefined}
+                    afterLabel={ai.generating ? 'Drafting reply…' : ai.draft ? 'AI draft ready' : null}
+                    after={
+                        <>
+                            <ConversationActions
+                                executions={actions.executions}
+                                latestRunId={actions.latestRunId}
+                                onChanged={() => void actions.reload()}
+                            />
+                            {!ai.draft && !ai.generating && (
+                                <TeachFromEdit run={agentRun.run} threads={threads} conversationId={id} isAdmin={isAdmin} />
+                            )}
+                            <AiDraftPanel
+                                draft={ai.draft}
+                                streamingText={ai.streamingText}
+                                generating={ai.generating}
+                                error={ai.error}
+                                handoverReason={conversation.handover_reason}
+                                aiConfigured={aiConfigured}
+                                onAccept={() => acceptDraft()}
+                                onAcceptText={(text) => acceptDraft(text)}
+                                conversationId={id}
+                                onRetry={ai.request}
+                                onDismiss={dismissDraft}
+                                onClearError={ai.clearError}
+                                run={agentRun.run}
+                                isAdmin={isAdmin}
+                                preview={preview}
+                                actionGate={gate}
+                            >
+                                <SlotRenderer name="conversation.draft.after" props={{ conversation, draft: ai.draft }} />
+                            </AiDraftPanel>
+                        </>
+                    }
                 />
 
                 {/* No overflow here: the saved-reply and Send Later popovers open upwards out of it. */}
                 <div className="shrink-0 bg-background border-t border-border/60">
-                    <ConversationActions
-                        executions={actions.executions}
-                        latestRunId={actions.latestRunId}
-                        onChanged={() => void actions.reload()}
-                    />
-                    {!ai.draft && !ai.generating && (
-                        <TeachFromEdit run={agentRun.run} threads={threads} conversationId={id} isAdmin={isAdmin} />
-                    )}
-                    <AiDraftPanel
-                        draft={ai.draft}
-                        streamingText={ai.streamingText}
-                        generating={ai.generating}
-                        error={ai.error}
-                        handoverReason={conversation.handover_reason}
-                        aiConfigured={aiConfigured}
-                        onAccept={() => acceptDraft()}
-                        onAcceptText={(text) => acceptDraft(text)}
-                        conversationId={id}
-                        onRetry={ai.request}
-                        onDismiss={dismissDraft}
-                        onClearError={ai.clearError}
-                        run={agentRun.run}
-                        isAdmin={isAdmin}
-                        preview={preview}
-                        actionGate={gate}
-                    >
-                        <SlotRenderer name="conversation.draft.after" props={{ conversation, draft: ai.draft }} />
-                    </AiDraftPanel>
-
                     {isChat ? (
                         <ChatComposer ref={composerRef} conversationId={id} refreshProps={mutationProps} />
                     ) : (

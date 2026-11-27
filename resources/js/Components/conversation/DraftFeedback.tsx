@@ -255,7 +255,7 @@ export default function DraftFeedback({
                         New feedback
                     </button>
                 </div>
-                <div className="max-h-[45vh] overflow-y-auto px-2.5 py-2">
+                <div className="px-2.5 py-2">
                     <FeedbackFlow
                         tracker={tracker}
                         isAdmin={isAdmin}

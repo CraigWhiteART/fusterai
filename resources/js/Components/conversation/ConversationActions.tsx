@@ -86,7 +86,7 @@ export default function ConversationActions({
     const pending = executions.filter((e) => e.status === 'pending_approval').length;
 
     return (
-        <div className="max-h-[45vh] space-y-2 overflow-y-auto px-4 pt-3">
+        <div className="space-y-2">
             <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                 <ShoppingBagIcon className="h-3.5 w-3.5 text-muted-foreground" />
                 Shopify actions

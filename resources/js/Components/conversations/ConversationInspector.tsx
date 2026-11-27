@@ -80,7 +80,7 @@ export default function ConversationInspector({
     const isAssignedToMe = conversation.assigned_user_id === currentUser.id;
 
     return (
-        <div className={cn('flex flex-col overflow-y-auto bg-background', className)}>
+        <div className={cn('flex shrink-0 flex-col bg-background', className)}>
             {/* ── Customer ── */}
             <div className="px-4 py-4 border-b border-border">
                 <div className="flex items-center justify-between mb-2.5">

@@ -90,7 +90,7 @@ export default function AiDraftPanel({
     if (!error && !handover && !generating && !draft) return null;
 
     return (
-        <div className="space-y-2 px-4 pt-3">
+        <div className="space-y-2">
             {error && (
                 <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
                     <AlertTriangleIcon className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
@@ -138,7 +138,7 @@ export default function AiDraftPanel({
 
                     {generating ? (
                         streamingText ? (
-                            <div className="text-xs text-foreground leading-relaxed bg-background rounded-md p-2.5 border border-info/20 max-h-40 overflow-y-auto whitespace-pre-wrap">
+                            <div className="text-sm text-foreground leading-relaxed bg-background rounded-md p-3 border border-info/20 whitespace-pre-wrap">
                                 {streamingText}
                                 <span className="inline-block w-0.5 h-3 bg-info ml-0.5 animate-pulse align-middle" />
                             </div>
@@ -167,7 +167,7 @@ export default function AiDraftPanel({
                                     ref={draftRef}
                                     onMouseUp={readSelection}
                                     onKeyUp={readSelection}
-                                    className="prose prose-sm max-w-none text-xs text-foreground leading-relaxed bg-background rounded-md p-2.5 mb-2 border border-info/20 max-h-40 overflow-y-auto"
+                                    className="prose prose-sm max-w-none text-sm text-foreground leading-relaxed bg-background rounded-md p-3 mb-2 border border-info/20"
                                     dangerouslySetInnerHTML={{ __html: sanitizeHtml(draftToHtml(shownText)) }}
                                 />
                                 {draftRun && <DraftWhy run={draftRun} isAdmin={isAdmin} conversationId={conversationId} />}

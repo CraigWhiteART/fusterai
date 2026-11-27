@@ -264,7 +264,25 @@ export default function ConversationsIndex({
                             </div>
                         </div>
 
-                        <InboxFilters filters={filters} counts={counts} isAgent={isAgent} mailboxes={mailboxes} tags={tags} go={go} />
+                        <InboxFilters
+                            filters={filters}
+                            counts={counts}
+                            isAgent={isAgent}
+                            mailboxes={mailboxes}
+                            tags={tags}
+                            go={go}
+                            leading={
+                                conversations.data.length > 0 && (
+                                    <Checkbox
+                                        checked={allSelected}
+                                        onCheckedChange={toggleSelectAll}
+                                        className="h-3.5 w-3.5 shrink-0"
+                                        aria-label={allSelected ? 'Deselect all' : 'Select all'}
+                                        title={allSelected ? 'Deselect all' : 'Select all on this page'}
+                                    />
+                                )
+                            }
+                        />
 
                         <InboxBulkBar
                             count={selectedIds.size}
@@ -274,19 +292,6 @@ export default function ConversationsIndex({
                             onAction={bulkAction}
                             onClear={() => setSelectedIds(new Set())}
                         />
-
-                        {/* Select-all header row */}
-                        {conversations.data.length > 0 && (
-                            <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-border/60 bg-muted/20 shrink-0">
-                                <Checkbox
-                                    checked={allSelected}
-                                    onCheckedChange={toggleSelectAll}
-                                    className="h-3.5 w-3.5"
-                                    aria-label="Select all"
-                                />
-                                <span className="text-[11px] text-muted-foreground">{allSelected ? 'Deselect all' : 'Select all'}</span>
-                            </div>
-                        )}
 
                         {/* List */}
                         <div className="flex-1 overflow-y-auto divide-y divide-border/60">

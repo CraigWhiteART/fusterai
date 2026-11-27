@@ -1,4 +1,5 @@
-import { ChevronDownIcon, MailboxIcon, XIcon } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { CalendarIcon, ChevronDownIcon, MailboxIcon, XIcon } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/Components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import type { Mailbox, Tag } from '@/types';
@@ -24,10 +25,16 @@ interface Props {
     mailboxes: Pick<Mailbox, 'id' | 'name'>[];
     tags: Tag[];
     go: (params: Record<string, string | undefined>) => void;
+    /** Rendered at the start of the filters row (the select-all checkbox). */
+    leading?: ReactNode;
 }
 
 /** Status tabs, assignment / mailbox / date filters and the active tag chip above the inbox list. */
-export default function InboxFilters({ filters, counts, isAgent, mailboxes, tags, go }: Props) {
+export default function InboxFilters({ filters, counts, isAgent, mailboxes, tags, go, leading }: Props) {
+    const hasDate = !!(filters.date_from || filters.date_to);
+    // The date range is rarely used: tucked behind a button, and always shown while it filters the list.
+    const [dateOpen, setDateOpen] = useState(hasDate);
+    const showDate = dateOpen || hasDate;
     const activeStatus = filters.status ?? 'open';
     const activeTag = tags.find((tag) => String(tag.id) === filters.tag);
     const statusTabs = [
@@ -64,6 +71,7 @@ export default function InboxFilters({ filters, counts, isAgent, mailboxes, tags
 
             {/* Filters row */}
             <div className="px-3 py-2 border-b border-border shrink-0 flex items-center gap-2">
+                {leading}
                 {/* Assignment segmented control */}
                 <div className="flex items-center bg-muted/60 rounded-lg p-0.5 gap-0.5">
                     {[
@@ -89,6 +97,8 @@ export default function InboxFilters({ filters, counts, isAgent, mailboxes, tags
                     })}
                 </div>
 
+                <span className="flex-1" />
+
                 {/* Mailbox filter — popover */}
                 {mailboxes.length > 1 &&
                     (() => {
@@ -98,7 +108,7 @@ export default function InboxFilters({ filters, counts, isAgent, mailboxes, tags
                                 <DropdownMenuTrigger asChild>
                                     <button
                                         className={cn(
-                                            'ml-auto flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium transition-all border',
+                                            'flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium transition-all border',
                                             activeMb
                                                 ? 'border-primary/30 bg-primary/5 text-primary'
                                                 : 'border-border bg-background text-muted-foreground hover:text-foreground',
@@ -124,35 +134,58 @@ export default function InboxFilters({ filters, counts, isAgent, mailboxes, tags
                             </DropdownMenu>
                         );
                     })()}
+
+                <button
+                    type="button"
+                    onClick={() => setDateOpen((v) => !v)}
+                    disabled={hasDate}
+                    title={hasDate ? 'Filtered by date' : 'Filter by date'}
+                    aria-label="Filter by date"
+                    aria-expanded={showDate}
+                    className={cn(
+                        'flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all',
+                        showDate
+                            ? 'border-primary/30 bg-primary/5 text-primary'
+                            : 'border-border bg-background text-muted-foreground hover:text-foreground',
+                    )}
+                >
+                    <CalendarIcon className="h-3 w-3" />
+                </button>
             </div>
 
             {/* Date range filter */}
-            <div className="px-3 py-2 border-b border-border shrink-0 flex items-center gap-1.5">
-                <span className="text-[11px] text-muted-foreground shrink-0">From</span>
-                <input
-                    type="date"
-                    value={filters.date_from ?? ''}
-                    onChange={(e) => go({ date_from: e.target.value || undefined, page: undefined })}
-                    className="flex-1 min-w-0 text-[11px] border border-input rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-                <span className="text-[11px] text-muted-foreground shrink-0">To</span>
-                <input
-                    type="date"
-                    value={filters.date_to ?? ''}
-                    min={filters.date_from}
-                    onChange={(e) => go({ date_to: e.target.value || undefined, page: undefined })}
-                    className="flex-1 min-w-0 text-[11px] border border-input rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-                {(filters.date_from || filters.date_to) && (
-                    <button
-                        type="button"
-                        onClick={() => go({ date_from: undefined, date_to: undefined, page: undefined })}
-                        className="text-muted-foreground hover:text-foreground shrink-0"
-                    >
-                        <XIcon className="h-3 w-3" />
-                    </button>
-                )}
-            </div>
+            {showDate && (
+                <div className="px-3 py-2 border-b border-border shrink-0 flex items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground shrink-0">From</span>
+                    <input
+                        type="date"
+                        value={filters.date_from ?? ''}
+                        onChange={(e) => go({ date_from: e.target.value || undefined, page: undefined })}
+                        className="flex-1 min-w-0 text-[11px] border border-input rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <span className="text-[11px] text-muted-foreground shrink-0">To</span>
+                    <input
+                        type="date"
+                        value={filters.date_to ?? ''}
+                        min={filters.date_from}
+                        onChange={(e) => go({ date_to: e.target.value || undefined, page: undefined })}
+                        className="flex-1 min-w-0 text-[11px] border border-input rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    {(filters.date_from || filters.date_to) && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setDateOpen(false);
+                                go({ date_from: undefined, date_to: undefined, page: undefined });
+                            }}
+                            aria-label="Clear date filter"
+                            className="text-muted-foreground hover:text-foreground shrink-0"
+                        >
+                            <XIcon className="h-3 w-3" />
+                        </button>
+                    )}
+                </div>
+            )}
 
             {/* Active tag indicator (compact) */}
             {activeTag && (
