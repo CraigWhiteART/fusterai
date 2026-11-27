@@ -6,7 +6,7 @@
 @import '@fontsource-variable/manrope';
 @import './global.css';
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:is(.dark *):not(.reading-light, .reading-light *));
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';

@@ -94,6 +94,64 @@
     --sidebar-ring: oklch(0.58 0.23 292);
 }
 
+/*
+ * The reading pane keeps the light palette in dark mode (like Gmail): email is
+ * written for a white page. `dark:` utilities are switched off inside it too
+ * (see the custom variant in app.css).
+ */
+.reading-light {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    /* Default primary: violet — matches the AI-native product identity */
+    --primary: oklch(0.58 0.23 292);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: 210 40% 98%;
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.58 0.23 292);
+
+    --success: 142 72% 29%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 24 10% 10%;
+    --info: 221 83% 53%;
+    --info-foreground: 0 0% 100%;
+
+    /* Sidebar gets a tinted violet-washed background by default */
+    --sidebar: color-mix(in oklab, oklch(0.985 0 0) 92%, oklch(0.58 0.23 292) 8%);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-muted: 222 30% 20%;
+    /* Light mode accent: pale violet — subtle hover at 80% opacity */
+    --sidebar-accent: oklch(0.88 0.06 292);
+    --sidebar-accent-foreground: oklch(0.18 0.08 292);
+
+    --radius: 0.625rem;
+
+    --chart-1: oklch(0.809 0.105 251.813);
+    --chart-2: oklch(0.623 0.214 259.815);
+    --chart-3: oklch(0.546 0.245 262.881);
+    --chart-4: oklch(0.488 0.243 264.376);
+    --chart-5: oklch(0.424 0.199 265.638);
+
+    --sidebar-primary: oklch(0.58 0.23 292);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.58 0.23 292);
+    color-scheme: light;
+}
+
+
 :root[data-theme-font='inter'] {
     --app-font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
 }
