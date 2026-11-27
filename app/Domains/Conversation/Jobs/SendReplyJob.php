@@ -7,6 +7,7 @@ use App\Domains\Agent\AutoSend\AutoSendService;
 use App\Domains\Channel\Drivers\WhatsAppDriver;
 use App\Domains\Conversation\Models\Conversation;
 use App\Domains\Conversation\Models\Thread;
+use App\Domains\Mailbox\Sync\Jobs\ArchiveConversationMailJob;
 use App\Domains\Mailbox\Sync\Threading\ReplyHeaders;
 use App\Enums\ChannelType;
 use App\Events\NewThreadReceived;
@@ -174,6 +175,12 @@ class SendReplyJob implements ShouldQueue
 
         if ($autoSend) {
             app(AutoSendService::class)->markSent($thread);
+        }
+
+        // Replied = done in Gmail: the mail answered by this reply is marked
+        // read and archived. Mail that arrived after it was written stays.
+        if (ArchiveConversationMailJob::enabled()) {
+            ArchiveConversationMailJob::dispatch($conversation->id, $thread->created_at);
         }
 
         // Broadcast to frontend after send

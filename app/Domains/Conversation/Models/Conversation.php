@@ -4,6 +4,7 @@ namespace App\Domains\Conversation\Models;
 
 use App\Domains\Customer\Models\Customer;
 use App\Domains\Mailbox\Models\Mailbox;
+use App\Domains\Mailbox\Sync\Jobs\ArchiveConversationMailJob;
 use App\Enums\ChannelType;
 use App\Enums\ConversationPriority;
 use App\Enums\ConversationStatus;
@@ -44,6 +45,18 @@ class Conversation extends Model
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs()
             ->useLogName('conversation');
+    }
+
+    protected static function booted(): void
+    {
+        // Closed here (by an agent, the API, a bulk action or an automation)
+        // = done in Gmail too. InboxReconciler closes with a raw update, so
+        // mail that is already archived never comes back through here.
+        static::updated(function (Conversation $conversation): void {
+            if ($conversation->wasChanged('status') && $conversation->status === ConversationStatus::Closed && ArchiveConversationMailJob::enabled()) {
+                ArchiveConversationMailJob::dispatch($conversation->id)->afterCommit();
+            }
+        });
     }
 
     protected static function newFactory(): ConversationFactory

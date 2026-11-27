@@ -10,6 +10,8 @@ use App\Domains\Conversation\Models\Folder;
 use App\Domains\Conversation\Models\Tag;
 use App\Domains\Customer\Models\Customer;
 use App\Domains\Mailbox\Models\Mailbox;
+use App\Domains\Mailbox\Sync\Contracts\InboxArchiver;
+use App\Domains\Mailbox\Sync\Imap\ImapInboxArchiver;
 use App\Models\CannedResponse;
 use App\Models\User;
 use App\Policies\AutomationRulePolicy;
@@ -35,7 +37,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AppServiceProvider extends ServiceProvider
 {
-    public function register(): void {}
+    public function register(): void
+    {
+        $this->app->bind(InboxArchiver::class, fn () => new ImapInboxArchiver);
+    }
 
     public function boot(): void
     {

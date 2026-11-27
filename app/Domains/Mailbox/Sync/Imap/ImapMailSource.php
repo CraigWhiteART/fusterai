@@ -13,9 +13,7 @@ use App\Domains\Mailbox\Sync\Exceptions\UidValidityChanged;
 use App\Domains\Mailbox\Sync\Parsing\TextOnlyMessage;
 use DateTimeInterface;
 use Throwable;
-use Webklex\PHPIMAP\Config;
 use Webklex\PHPIMAP\Connection\Protocols\ImapProtocol;
-use Webklex\PHPIMAP\Connection\Protocols\Response;
 
 /**
  * MailSource over IMAP, using webklex/php-imap only for the socket, TLS and
@@ -26,7 +24,8 @@ use Webklex\PHPIMAP\Connection\Protocols\Response;
  *
  * Read-only by construction: folders are opened with EXAMINE (never SELECT)
  * and content is fetched with BODY.PEEK, so \Seen is never set. No STORE,
- * EXPUNGE, COPY or MOVE command exists in this class.
+ * EXPUNGE, COPY or MOVE command exists in this class. Writes (marking read,
+ * archiving) live in ImapInboxArchiver.
  *
  * Without X-GM-EXT-1 (any non-Gmail server, or Gmail with the extension
  * missing) the X-GM-* items are left out of FETCH, envelopes carry null Gmail
@@ -35,6 +34,8 @@ use Webklex\PHPIMAP\Connection\Protocols\Response;
  */
 class ImapMailSource implements MailSource
 {
+    use SpeaksImap;
+
     public const GMAIL_CAPABILITY = 'X-GM-EXT-1';
 
     /** Max UIDs per body FETCH, to bound memory per round trip. */
@@ -69,6 +70,16 @@ class ImapMailSource implements MailSource
 
     public static function fromMailbox(Mailbox $mailbox): self
     {
+        return new self(self::configFor($mailbox));
+    }
+
+    /**
+     * The mailbox's IMAP settings, ready to connect with.
+     *
+     * @return array<string, mixed>
+     */
+    public static function configFor(Mailbox $mailbox): array
+    {
         $config = $mailbox->imap_config;
         if (! $config || empty($config['host']) || empty($config['username'])) {
             throw new MailSourceException("Mailbox {$mailbox->id} has no usable IMAP config");
@@ -76,7 +87,7 @@ class ImapMailSource implements MailSource
 
         $config['password'] = self::normalizePassword((string) ($config['password'] ?? ''));
 
-        return new self($config);
+        return $config;
     }
 
     /** Gmail app passwords are 16 letters, often pasted with spaces. */
@@ -452,96 +463,8 @@ class ImapMailSource implements MailSource
         return null; // expunged meanwhile
     }
 
-    private function quote(string $value): string
-    {
-        return '"'.str_replace(['\\', '"'], ['\\\\', '\\"'], $value).'"';
-    }
-
     private function stripTags(string $raw): string
     {
         return (string) preg_replace('/^TAG\d+ .*$/m', '', $raw);
-    }
-
-    /**
-     * Send one command and return the complete raw response (untagged lines
-     * plus the tagged completion), literals included verbatim.
-     */
-    private function command(string $command): string
-    {
-        $protocol = $this->protocol();
-
-        try {
-            $tag = null;
-            $response = $protocol->sendRequest($command, [], $tag);
-            $raw = $this->readUntilTagged($protocol, $response, (string) $tag);
-        } catch (MailSourceException $e) {
-            throw $e;
-        } catch (Throwable $e) {
-            // Connection state is unknown after a failed read; force a reconnect.
-            $this->close();
-            throw new MailSourceException("IMAP command failed: {$this->redact($command)}: {$e->getMessage()}", 0, $e);
-        }
-
-        $status = $this->parser->taggedStatus($raw, (string) $tag);
-        if ($status === null || $status['status'] !== 'OK') {
-            throw new MailSourceException("IMAP {$this->redact($command)} failed: ".($status['status'] ?? '?').' '.($status['text'] ?? ''));
-        }
-
-        return $raw;
-    }
-
-    private function readUntilTagged(ImapProtocol $protocol, Response $response, string $tag): string
-    {
-        $raw = '';
-        while (true) {
-            $line = $protocol->nextLine($response);
-            $raw .= $line;
-
-            // A line ending in {n} announces n literal bytes, which may contain
-            // newlines and may be followed by more of the same response line.
-            while (preg_match('/\{(\d+)\+?\}\r?\n$/', $line, $m)) {
-                $need = (int) $m[1];
-                $literal = '';
-                while (strlen($literal) < $need) {
-                    $literal .= $protocol->nextLine($response);
-                }
-                $raw .= $literal;
-                $line = substr($literal, $need);
-                if ($line === '') {
-                    $line = $protocol->nextLine($response);
-                    $raw .= $line;
-                }
-            }
-
-            if (str_starts_with($line, $tag.' ')) {
-                return $raw;
-            }
-        }
-    }
-
-    private function protocol(): ImapProtocol
-    {
-        if ($this->protocol !== null) {
-            return $this->protocol;
-        }
-
-        $encryption = $this->config['encryption'] ?? 'ssl';
-        $encryption = in_array($encryption, [null, false, '', 'none', 'notls'], true) ? false : (string) $encryption;
-
-        try {
-            $protocol = new ImapProtocol(Config::make(), (bool) ($this->config['validate_cert'] ?? true), $encryption);
-            $protocol->setConnectionTimeout((int) ($this->config['timeout'] ?? 30));
-            $protocol->connect((string) $this->config['host'], (int) ($this->config['port'] ?? 993));
-            $protocol->login((string) $this->config['username'], (string) $this->config['password']);
-        } catch (Throwable $e) {
-            throw new MailSourceException('IMAP connect/login failed: '.$e->getMessage(), 0, $e);
-        }
-
-        return $this->protocol = $protocol;
-    }
-
-    private function redact(string $command): string
-    {
-        return str_starts_with(strtoupper($command), 'LOGIN') ? 'LOGIN ***' : $command;
     }
 }

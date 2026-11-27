@@ -26,6 +26,11 @@ return [
     // has no limit).
     'max_archive_closes_per_run' => (int) env('MAIL_SYNC_MAX_ARCHIVE_CLOSES', 25),
 
+    // The other direction: when a conversation is closed, or a reply to it is
+    // sent, its customer mail is marked read and archived in Gmail
+    // (ArchiveConversationMailJob). The only write the sync ever makes.
+    'archive_when_done' => (bool) env('MAIL_SYNC_ARCHIVE_WHEN_DONE', true),
+
     // Mail older than this when it is ingested (the first-sync lookback, or
     // catching up after an outage) still becomes a conversation, but gets no
     // AI draft, automation, notification or auto-reply. 0 = no limit.

@@ -5,6 +5,7 @@ Code: `app/Domains/Mailbox/Sync`. Tables: `mail_messages`, `mail_sync_states`.
 ## Shape
 
 - `MailSource` (contract) reads a mailbox: `syncFolders()`, `folderState()`, `fetchEnvelopes()`, `fetchBodies()`, `firstUidOnOrAfter()`. It is read-only: EXAMINE, never SELECT; BODY.PEEK, never BODY; no STORE.
+- `InboxArchiver` (contract, `ImapInboxArchiver`) is the one writer. See "Done in fusterai = done in Gmail".
 - `ImapMailSource` implements it on webklex/php-imap's socket and LOGIN, but sends commands itself (`ImapProtocol::sendRequest()` + `nextLine()`) and parses the bytes with `ImapWireParser`. webklex 6.2's FETCH decoder splits the last quoted item of a list, so quoted `X-GM-LABELS` come back broken. A test pins that behaviour.
 - `FakeMailSource` serves `.eml` fixtures (`tests/Fixtures/mail`, with `manifest.json` for UIDs, Gmail ids and labels). It can inject a failure and simulate a UIDVALIDITY change.
 - `MessageParser` turns RFC 822 into ledger fields. It reads headers with our own `HeaderBlock` and decodes MIME with webklex `Message::fromString()`. `QuoteStripper` fills `body_clean`.
@@ -23,6 +24,14 @@ Code: `app/Domains/Mailbox/Sync`. Tables: `mail_messages`, `mail_sync_states`.
 - `new IngestMailMessageJob($id, historical: true)` suppresses every side effect, creates conversations closed and `imported`, and marks threads `origin = import` (for the backfill).
 - Replies sent by fusterai: `Message-ID: thread-{id}-{uuid}@fusterai` (stored in `threads.message_id`), `X-FusterAI-Thread: {id}`, and `In-Reply-To` / `References` from the customer's last inbound ledger message (`ReplyHeaders`), falling back to `<conversation-N@fusterai>`.
 - Mailbox aliases (`mailboxes.aliases`, edited on the mailbox settings page) are extra addresses that count as "us".
+
+## Done in fusterai = done in Gmail
+
+- Gmail to fusterai: `InboxReconciler` (run by `emails:fetch`) closes an open or pending conversation once all its customer mail has left the Inbox. A new customer message reopens it.
+- fusterai to Gmail: when a conversation changes to Closed (agent, API, bulk action or automation; `Conversation::booted()`), or a reply to it is sent (`SendReplyJob`), `ArchiveConversationMailJob` marks its mail read and archives it. It sends `SELECT` on the ledger folder, then `UID STORE +FLAGS.SILENT (\Seen)` and `UID STORE -X-GM-LABELS (\Inbox)`. It never sends CLOSE, EXPUNGE, COPY or MOVE.
+- Only the conversation's own ledger rows that carry `\Inbox` are touched, never the rest of the Gmail thread: Gmail can thread different customers together (Shopify contact forms). After a reply, only mail ledgered before the reply was written is archived. A customer message that came in meanwhile stays in the Inbox, and the conversation stays open.
+- Archiving after a reply makes `InboxReconciler` close the conversation on a later run (customer mail newer than 10 minutes holds it open). That matches "archived = done".
+- The reconciler closes with a plain query update, so it never triggers the write-back. Rows whose stored UIDVALIDITY no longer matches are skipped. Gmail only. Off with `MAIL_SYNC_ARCHIVE_WHEN_DONE=false`.
 
 ## Folders
 
