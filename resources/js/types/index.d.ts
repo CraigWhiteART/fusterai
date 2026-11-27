@@ -144,6 +144,8 @@ export interface Conversation {
     snoozed_until?: string;
     starred?: boolean;
     is_unread?: boolean;
+    /** Inbox list only: where the AI agent got to (a draft waiting, or handed to a person). `label` is the plain reason. */
+    agent_marker?: { state: 'draft_ready' | 'needs_you'; label: string | null } | null;
     created_at: string;
 
     // Relations

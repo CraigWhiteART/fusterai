@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckSquareIcon, ExternalLinkIcon, InboxIcon, RotateCcwIcon, SquareIcon } from 'lucide-react';
+import { CheckSquareIcon, ExternalLinkIcon, InboxIcon, PencilIcon, RotateCcwIcon, SquareIcon, Undo2Icon, XIcon } from 'lucide-react';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
+import { Input } from '@/Components/ui/input';
+import { Textarea } from '@/Components/ui/textarea';
 import {
     ConflictList,
     DiffEntries,
@@ -35,7 +37,7 @@ import {
     type ApiError,
 } from '@/lib/agentLoop';
 import { cn } from '@/lib/utils';
-import type { DiffEntry, Proposal, ProposalChange, ProposalEvidence } from '@/types/agentLoop';
+import type { DiffEntry, MiningInconsistency, Proposal, ProposalChange, ProposalEvidence, ProposalExcluded } from '@/types/agentLoop';
 import { AgentPage, EmptyState, Notice, Section } from '../AgentParts';
 
 const STATUS_FILTERS: { value: string; label: string }[] = [
@@ -119,6 +121,83 @@ function expectationText(e: Record<string, unknown>): string {
     return parts.join('; ') || 'judged against what the person actually sent';
 }
 
+/** A topic code such as `dispatch_estimates` in plain words: "Dispatch estimates". */
+function plainTopic(topic: string | null | undefined): string {
+    const text = (topic ?? '').replace(/_/g, ' ').trim();
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : 'Unnamed point';
+}
+
+function str(value: unknown): string {
+    return typeof value === 'string' ? value : '';
+}
+
+/** Long text shown as a few lines with "Show more". */
+function ClampedText({ text }: { text: string }) {
+    const [open, setOpen] = useState(false);
+    const long = text.length > 320 || text.split('\n').length > 4;
+    return (
+        <div>
+            <p className={cn('whitespace-pre-wrap text-sm text-muted-foreground', long && !open && 'line-clamp-4')}>{text}</p>
+            {long && (
+                <button
+                    type="button"
+                    className="mt-1 text-xs font-medium text-primary hover:underline"
+                    aria-expanded={open}
+                    onClick={() => setOpen((v) => !v)}
+                >
+                    {open ? 'Show less' : 'Show more'}
+                </button>
+            )}
+        </div>
+    );
+}
+
+/** One point where past replies disagreed: what was said, where, and the suggestion. */
+function InconsistencyBody({ inc }: { inc: MiningInconsistency }) {
+    return (
+        <>
+            {inc.summary && <p className="text-muted-foreground">{inc.summary}</p>}
+            {asArray<{ statement?: string; evidence?: number[]; last_seen?: string | null }>(inc.versions).map((v, j) => (
+                <div key={j} className="border-l-2 border-border pl-2">
+                    <p>
+                        “{v.statement}”{v.last_seen ? <span className="text-muted-foreground"> · last seen {v.last_seen}</span> : null}
+                    </p>
+                    <ConversationLinks list={ids(v.evidence)} label="In" />
+                </div>
+            ))}
+            {inc.recommendation && <p className="text-primary">Suggested: {inc.recommendation}</p>}
+        </>
+    );
+}
+
+/**
+ * The disagreement a new knowledge item settles. Mining records which change
+ * answers which point (`inconsistency.knowledge`: title and body as stored).
+ * Runs from before that link existed only match in the one exact case: the
+ * run's own wording (the topic as the title, the latest statement as the body).
+ */
+function inconsistencyFor(change: ProposalChange, evidence: ProposalEvidence): MiningInconsistency | null {
+    if (change.target_type !== 'knowledge' || change.target_id !== null) return null;
+    const after = asRecord<unknown>(change.after);
+    const title = str(after.title).trim();
+    const body = str(after.body).trim();
+    if (!body) return null;
+    const list = asArray<MiningInconsistency>(evidence.inconsistencies);
+    return (
+        list.find((inc) => !!inc.knowledge && str(inc.knowledge.title).trim() === title && str(inc.knowledge.body).trim() === body) ??
+        list.find((inc) => !inc.knowledge && plainTopic(inc.topic) === title && str(inc.most_recent).trim() === body) ??
+        null
+    );
+}
+
+/** Stable across the rewrites that leaving out or editing an item causes (change ids are renewed each time). */
+function changeKey(change: ProposalChange): string {
+    const text = JSON.stringify(change.ops ?? []);
+    let hash = 5381;
+    for (let i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+    return `${change.target_type}:${change.target_id ?? ''}:${(hash >>> 0).toString(36)}`;
+}
+
 // Per-browser "reviewed" ticks so a long mining proposal can be gone through item by item.
 function useReviewedItems(proposalId: number | null) {
     const key = proposalId ? `agent.proposal.reviewed.${proposalId}` : null;
@@ -150,19 +229,122 @@ function useReviewedItems(proposalId: number | null) {
     return { done, toggle };
 }
 
+type OpFields = { title?: string | null; body?: string; if?: string | null; then?: string };
+
+/** The text a person can sensibly rewrite: new knowledge (title, body) and a playbook rule (when, what to do). */
+function editableKind(change: ProposalChange, op: Record<string, unknown> | undefined): 'knowledge' | 'rule' | null {
+    if (!op) return null;
+    if (change.target_type === 'knowledge' && op.op === 'create_knowledge') return 'knowledge';
+    if (change.target_type === 'playbook' && (op.op === 'add_rule' || op.op === 'replace_rule')) return 'rule';
+    return null;
+}
+
+function EditOpForm({
+    kind,
+    op,
+    busy,
+    onSave,
+    onCancel,
+}: {
+    kind: 'knowledge' | 'rule';
+    op: Record<string, unknown>;
+    busy: boolean;
+    onSave: (fields: OpFields) => void;
+    onCancel: () => void;
+}) {
+    const [title, setTitle] = useState(str(op.title));
+    const [body, setBody] = useState(str(op.body));
+    const [when, setWhen] = useState(str(op.if).toLowerCase() === 'always' ? '' : str(op.if));
+    const [then, setThen] = useState(str(op.then));
+    const main = kind === 'knowledge' ? body : then;
+
+    return (
+        <form
+            className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-2.5"
+            onSubmit={(e) => {
+                e.preventDefault();
+                onSave(
+                    kind === 'knowledge'
+                        ? { title: title.trim() || null, body: body.trim() }
+                        : { if: when.trim() || null, then: then.trim() },
+                );
+            }}
+        >
+            {kind === 'knowledge' ? (
+                <>
+                    <label className="block space-y-1 text-[11px] font-medium text-muted-foreground">
+                        Title
+                        <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={255} className="h-8 text-xs" />
+                    </label>
+                    <label className="block space-y-1 text-[11px] font-medium text-muted-foreground">
+                        What the agent should know
+                        <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} maxLength={20000} className="text-xs" />
+                    </label>
+                </>
+            ) : (
+                <>
+                    <label className="block space-y-1 text-[11px] font-medium text-muted-foreground">
+                        When (leave empty for “always”)
+                        <Input value={when} onChange={(e) => setWhen(e.target.value)} maxLength={500} className="h-8 text-xs" />
+                    </label>
+                    <label className="block space-y-1 text-[11px] font-medium text-muted-foreground">
+                        What the agent should do
+                        <Textarea value={then} onChange={(e) => setThen(e.target.value)} rows={3} maxLength={1000} className="text-xs" />
+                    </label>
+                </>
+            )}
+            <div className="flex flex-wrap items-center gap-1.5">
+                <Button type="submit" size="sm" className="h-7 text-xs" disabled={busy || main.trim() === ''}>
+                    {busy ? <Spinner className="h-3 w-3" /> : null} Save
+                </Button>
+                <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={onCancel}>
+                    Cancel
+                </Button>
+                <span className="text-[11px] text-muted-foreground">Saving checks the proposal for conflicts again.</span>
+            </div>
+        </form>
+    );
+}
+
+const CARD_ACTION =
+    'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50';
+
 function ChangeCard({
     change,
     evidence,
     reviewed,
     onToggle,
+    open,
+    busy,
+    acting,
+    error,
+    onLeaveOut,
+    onSave,
 }: {
     change: ProposalChange;
     evidence: ProposalEvidence;
     reviewed: boolean;
     onToggle: () => void;
+    /** The proposal can still be changed. */
+    open: boolean;
+    /** Some item of this proposal is being saved. */
+    busy: boolean;
+    /** This card is the one being saved. */
+    acting: boolean;
+    error: ApiError | null;
+    /** Leave out the whole change, or one op of it. */
+    onLeaveOut: (opIndex?: number) => void;
+    onSave: (opIndex: number, fields: OpFields) => Promise<boolean>;
 }) {
+    const [editing, setEditing] = useState<number | null>(null);
     const entries = asArray<DiffEntry>(change.diff);
+    const ops = asArray<Record<string, unknown>>(change.ops);
     const tests = change.target_type === 'test_case' ? testCaseOps(change) : [];
+    // One line of the diff per op (everything but a new playbook, which lists its parts).
+    const paired = tests.length === 0 && ops.length === entries.length;
+    const single = ops.length === 1;
+    const kindOf = (index: number) => (paired ? editableKind(change, ops[index]) : null);
+    const disagreement = inconsistencyFor(change, evidence);
     const label = change.target_label || TARGET_TYPE_LABELS[change.target_type] || change.target_type;
     const href =
         change.target_type === 'playbook' && change.target_id
@@ -172,6 +354,19 @@ function ChangeCard({
               : change.target_type === 'voice'
                 ? '/agent/voice'
                 : null;
+
+    const form = (index: number) => {
+        const kind = kindOf(index);
+        return kind && editing === index ? (
+            <EditOpForm
+                kind={kind}
+                op={ops[index]}
+                busy={acting}
+                onCancel={() => setEditing(null)}
+                onSave={(fields) => void onSave(index, fields).then((ok) => ok && setEditing(null))}
+            />
+        ) : null;
+    };
 
     return (
         <li className={cn('rounded-lg border p-3', reviewed ? 'border-success/30 bg-success/5' : 'border-border bg-background')}>
@@ -218,14 +413,117 @@ function ChangeCard({
                         const support = itemEvidence(entry, evidence);
                         return (
                             <li key={`${entry.item_id ?? ''}-${i}`} className="space-y-1">
-                                <DiffEntries entries={[{ ...entry, target_label: undefined }]} />
+                                {form(i) ?? <DiffEntries entries={[{ ...entry, target_label: undefined }]} />}
                                 <ConversationLinks list={support} />
+                                {open && paired && !single && editing !== i && (
+                                    <div className="flex items-center gap-1">
+                                        {kindOf(i) && (
+                                            <button type="button" className={CARD_ACTION} disabled={busy} onClick={() => setEditing(i)}>
+                                                <PencilIcon className="h-3 w-3" /> Edit
+                                            </button>
+                                        )}
+                                        <button type="button" className={CARD_ACTION} disabled={busy} onClick={() => onLeaveOut(i)}>
+                                            <XIcon className="h-3 w-3" /> Leave this one out
+                                        </button>
+                                    </div>
+                                )}
                             </li>
                         );
                     })}
                 </ul>
             )}
+            {disagreement && (
+                <div className="mt-2.5 space-y-1 rounded-md border border-warning/30 bg-warning/5 p-2 text-xs">
+                    <p className="font-medium">
+                        Your past replies disagreed on this
+                        {disagreement.situation_name ? (
+                            <span className="font-normal text-muted-foreground"> · {disagreement.situation_name}</span>
+                        ) : null}
+                    </p>
+                    <InconsistencyBody inc={disagreement} />
+                </div>
+            )}
+            {open && (
+                <div className="mt-2.5 flex flex-wrap items-center gap-1 border-t border-border pt-2">
+                    {single && kindOf(0) && editing === null && (
+                        <button type="button" className={CARD_ACTION} disabled={busy} onClick={() => setEditing(0)}>
+                            <PencilIcon className="h-3 w-3" /> Edit
+                        </button>
+                    )}
+                    <button type="button" className={CARD_ACTION} disabled={busy} onClick={() => onLeaveOut()}>
+                        <XIcon className="h-3 w-3" /> Leave out
+                    </button>
+                    {acting && (
+                        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <Spinner className="h-3 w-3" /> Saving…
+                        </span>
+                    )}
+                </div>
+            )}
+            <ErrorLine error={error} />
         </li>
+    );
+}
+
+/** Text of a left-out item, enough to recognise it. */
+function excludedText(item: ProposalExcluded): string {
+    return asArray<Record<string, unknown>>(item.ops)
+        .map((op) =>
+            [str(op.title), str(op.body) || str(op.then) || str(op.text) || str(op.name) || str(op.value)].filter(Boolean).join(': '),
+        )
+        .filter(Boolean)
+        .join(' · ');
+}
+
+function LeftOutList({
+    items,
+    open,
+    busyKey,
+    error,
+    onPutBack,
+}: {
+    items: ProposalExcluded[];
+    open: boolean;
+    busyKey: string | null;
+    error: { key: string; error: ApiError } | null;
+    onPutBack: (item: ProposalExcluded) => void;
+}) {
+    if (items.length === 0) return null;
+    return (
+        <Disclosure title={`Left out (${items.length})`} className="rounded-lg border border-dashed border-border p-3">
+            <p className="mb-2 text-[11px] text-muted-foreground">
+                {open ? 'These will not be applied when you approve. Put one back to include it again.' : 'These were not applied.'}
+            </p>
+            <ul className="space-y-2">
+                {items.map((item) => {
+                    const key = `x${item.id}`;
+                    const text = excludedText(item);
+                    return (
+                        <li key={item.id} className="flex items-start gap-2 text-xs">
+                            <div className="min-w-0 flex-1">
+                                <p className="font-medium">
+                                    {item.target_label || TARGET_TYPE_LABELS[item.target_type] || item.target_type}
+                                    {item.kind === 'op' ? <span className="font-normal text-muted-foreground"> · one part</span> : null}
+                                </p>
+                                {text && <p className="line-clamp-2 text-muted-foreground">{text}</p>}
+                                {error?.key === key && <ErrorLine error={error.error} />}
+                            </div>
+                            {open && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 shrink-0 text-xs"
+                                    disabled={busyKey !== null}
+                                    onClick={() => onPutBack(item)}
+                                >
+                                    {busyKey === key ? <Spinner className="h-3 w-3" /> : <Undo2Icon className="h-3 w-3" />} Put back
+                                </Button>
+                            )}
+                        </li>
+                    );
+                })}
+            </ul>
+        </Disclosure>
     );
 }
 
@@ -235,7 +533,7 @@ function EvidenceBlock({ proposal }: { proposal: Proposal }) {
     const conversations = ids(ev.conversation_ids);
     const staff = asArray<{ label?: string; replies?: number }>(ev.staff);
     const diffs = asArray<{ topic?: string; note?: string }>(ev.staff_differences);
-    const inconsistencies = asArray<NonNullable<ProposalEvidence['inconsistencies']>[number]>(ev.inconsistencies);
+    const inconsistencies = asArray<MiningInconsistency>(ev.inconsistencies);
     const hasAnything =
         !!proposal.conversation_id ||
         conversations.length > 0 ||
@@ -296,29 +594,18 @@ function EvidenceBlock({ proposal }: { proposal: Proposal }) {
                     </ul>
                 )}
                 {inconsistencies.length > 0 && (
-                    <Disclosure title={`Places your past replies disagreed (${inconsistencies.length})`} defaultOpen>
+                    <Disclosure
+                        title={`Places your past replies disagreed (${inconsistencies.length})`}
+                        defaultOpen={inconsistencies.length <= 8}
+                    >
                         <ul className="space-y-2">
                             {inconsistencies.map((inc, i) => (
                                 <li key={i} className="space-y-1 rounded-md border border-border p-2">
                                     <p className="font-medium">
-                                        {inc.topic?.replace(/_/g, ' ')}
+                                        {plainTopic(inc.topic)}
                                         {inc.situation_name ? <span className="text-muted-foreground"> · {inc.situation_name}</span> : null}
                                     </p>
-                                    {inc.summary && <p className="text-muted-foreground">{inc.summary}</p>}
-                                    {asArray<{ statement?: string; evidence?: number[]; last_seen?: string | null }>(inc.versions).map(
-                                        (v, j) => (
-                                            <div key={j} className="border-l-2 border-border pl-2">
-                                                <p>
-                                                    “{v.statement}”
-                                                    {v.last_seen ? (
-                                                        <span className="text-muted-foreground"> · last seen {v.last_seen}</span>
-                                                    ) : null}
-                                                </p>
-                                                <ConversationLinks list={ids(v.evidence)} label="In" />
-                                            </div>
-                                        ),
-                                    )}
-                                    {inc.recommendation && <p className="text-primary">Suggested: {inc.recommendation}</p>}
+                                    <InconsistencyBody inc={inc} />
                                 </li>
                             ))}
                         </ul>
@@ -565,6 +852,26 @@ function ProposalDetail({ id, onUpdated }: { id: number; onUpdated: (p: Proposal
         [onUpdated, soon],
     );
 
+    // Leave out / put back / edit: one at a time; the error shows on the item it belongs to.
+    const [busyKey, setBusyKey] = useState<string | null>(null);
+    const [actionError, setActionError] = useState<{ key: string; error: ApiError } | null>(null);
+    const mutate = useCallback(
+        async (key: string, fn: () => Promise<Proposal>): Promise<boolean> => {
+            setBusyKey(key);
+            setActionError(null);
+            try {
+                change(await fn());
+                return true;
+            } catch (e) {
+                setActionError({ key, error: toApiError(e) });
+                return false;
+            } finally {
+                setBusyKey(null);
+            }
+        },
+        [change],
+    );
+
     if (error && !proposal) return <ErrorLine error={error} />;
     if (!proposal)
         return (
@@ -575,7 +882,10 @@ function ProposalDetail({ id, onUpdated }: { id: number; onUpdated: (p: Proposal
 
     const evidence = evidenceOf(proposal);
     const changes = asArray<ProposalChange>(proposal.changes);
-    const reviewedCount = changes.filter((c) => done.has(String(c.id))).length;
+    const excluded = asArray<ProposalExcluded>(proposal.excluded);
+    // On a long proposal every click would re-run the (slow, paid) conflict check: skip it and check once before approving.
+    const recheck = asArray(proposal.changes).length <= 8;
+    const reviewedCount = changes.filter((c) => done.has(changeKey(c))).length;
     const open = isOpenProposal(proposal.status);
 
     return (
@@ -589,7 +899,7 @@ function ProposalDetail({ id, onUpdated }: { id: number; onUpdated: (p: Proposal
                     </span>
                 </div>
                 <h2 className="text-lg font-semibold">{proposal.title || 'Untitled proposal'}</h2>
-                {proposal.rationale && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{proposal.rationale}</p>}
+                {proposal.rationale && <ClampedText text={proposal.rationale} />}
                 {proposal.status === 'stale' && (
                     <Notice tone="warning">
                         The live instructions changed after this was written. Rebase it to re-apply the same changes to the current version.
@@ -602,22 +912,51 @@ function ProposalDetail({ id, onUpdated }: { id: number; onUpdated: (p: Proposal
             <Section
                 title={`Changes (${changes.length})`}
                 description={
-                    changes.length > 1
-                        ? `Go through them one by one: ${reviewedCount} of ${changes.length} ticked. Approving applies all of them; to drop one, reject the whole proposal with a note.`
-                        : undefined
+                    !open
+                        ? undefined
+                        : changes.length > 1
+                          ? `Go through them one by one: ${reviewedCount} of ${changes.length} ticked. Leave out anything you do not want and edit wording where you can; approving applies what remains.`
+                          : 'Edit the wording where you can. Approving applies it.'
                 }
             >
                 <ul className="space-y-2">
-                    {changes.map((c) => (
-                        <ChangeCard
-                            key={c.id}
-                            change={c}
-                            evidence={evidence}
-                            reviewed={done.has(String(c.id))}
-                            onToggle={() => toggle(String(c.id))}
-                        />
-                    ))}
+                    {changes.map((c) => {
+                        const key = `c${c.id}`;
+                        return (
+                            <ChangeCard
+                                key={c.id}
+                                change={c}
+                                evidence={evidence}
+                                reviewed={done.has(changeKey(c))}
+                                onToggle={() => toggle(changeKey(c))}
+                                open={open}
+                                busy={busyKey !== null}
+                                acting={busyKey === key}
+                                error={actionError?.key === key ? actionError.error : null}
+                                onLeaveOut={(opIndex) =>
+                                    void mutate(key, () =>
+                                        loopApi.exclude(
+                                            proposal.id,
+                                            opIndex === undefined
+                                                ? { change_ids: [c.id], recheck }
+                                                : { ops: [{ change_id: c.id, op_index: opIndex }], recheck },
+                                        ),
+                                    )
+                                }
+                                onSave={(opIndex, fields) =>
+                                    mutate(key, () => loopApi.editChange(proposal.id, c.id, { op_index: opIndex, ...fields, recheck }))
+                                }
+                            />
+                        );
+                    })}
                 </ul>
+                <LeftOutList
+                    items={excluded}
+                    open={open}
+                    busyKey={busyKey}
+                    error={actionError}
+                    onPutBack={(item) => void mutate(`x${item.id}`, () => loopApi.restoreExclusions(proposal.id, [item.id], recheck))}
+                />
                 <SuggestionNotes
                     suggestions={proposal.suggestions}
                     intro="Suggestions only: the AI never changes permissions, limits or modes. A person can, in settings:"
@@ -632,7 +971,14 @@ function ProposalDetail({ id, onUpdated }: { id: number; onUpdated: (p: Proposal
             {(open || proposal.gate) && <TestsBlock proposal={proposal} onChange={change} />}
 
             {open ? (
-                <Section title="Decision">
+                <Section
+                    title="Decision"
+                    description={`Approving applies ${plural(changes.length, 'item')}. ${
+                        excluded.length > 0
+                            ? `${plural(excluded.length, 'item')} left out and will not be applied.`
+                            : 'Nothing is left out.'
+                    }`}
+                >
                     <Decision proposal={proposal} isAdmin onChange={change} compact={false} />
                 </Section>
             ) : proposal.status === 'applied' || proposal.status === 'reverted' ? (

@@ -1,5 +1,6 @@
 import React from 'react';
-import { ClockIcon, StarIcon } from 'lucide-react';
+import { ClockIcon, HandIcon, SparklesIcon, StarIcon } from 'lucide-react';
+import { capitalise } from '@/Components/conversation/agentLabels';
 import { relativeTime } from '@/Components/conversation/format';
 import { Avatar, AvatarFallback, AvatarImage } from '@/Components/ui/avatar';
 import { Checkbox } from '@/Components/ui/checkbox';
@@ -29,6 +30,7 @@ export default function ConversationRow({
     onStar: (e: React.MouseEvent) => void;
 }) {
     const isSnoozed = conversation.snoozed_until && new Date(conversation.snoozed_until) > new Date();
+    const marker = conversation.agent_marker ?? null;
 
     return (
         <div
@@ -123,6 +125,25 @@ export default function ConversationRow({
                                     <span className="inline-flex items-center gap-0.5 text-[11px] text-warning font-medium px-1.5 py-0.5 rounded-md bg-warning/10">
                                         <ClockIcon className="h-2.5 w-2.5" />
                                         Snoozed
+                                    </span>
+                                )}
+
+                                {marker?.state === 'needs_you' && (
+                                    <span
+                                        className="inline-flex items-center gap-0.5 text-[11px] text-warning font-medium px-1.5 py-0.5 rounded-md bg-warning/10"
+                                        title={marker.label ? capitalise(marker.label) : 'The AI agent handed this to a person'}
+                                    >
+                                        <HandIcon className="h-2.5 w-2.5" />
+                                        Needs you
+                                    </span>
+                                )}
+                                {marker?.state === 'draft_ready' && (
+                                    <span
+                                        className="inline-flex items-center gap-0.5 text-[11px] text-info font-medium px-1.5 py-0.5 rounded-md bg-info/10"
+                                        title="The AI agent has written a reply for you to check and send"
+                                    >
+                                        <SparklesIcon className="h-2.5 w-2.5" />
+                                        Draft ready
                                     </span>
                                 )}
 

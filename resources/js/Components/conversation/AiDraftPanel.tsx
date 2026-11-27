@@ -42,7 +42,7 @@ export interface AiDraftPanelProps {
 /**
  * The AI draft for the open conversation. States, in order of precedence:
  * error banner · "Needs a human" banner (+ what the agent found) · generating
- * (skeleton or streamed text) · draft with Accept / Retry / Dismiss, the "why"
+ * (skeleton or streamed text) · draft with Use this draft / Retry / Dismiss, the "why"
  * disclosure and the feedback seam. Renders nothing when there is nothing to say.
  */
 export default function AiDraftPanel({
@@ -212,12 +212,12 @@ export default function AiDraftPanel({
                                             needsRewrite
                                                 ? 'This draft promises an action that did not happen. Redraft it instead.'
                                                 : waiting
-                                                  ? 'You can edit it now, but send it only after the Shopify action is done.'
-                                                  : undefined
+                                                  ? 'Puts the draft in the reply box. You can edit it now, but send it only after the Shopify action is done.'
+                                                  : 'Puts the draft in the reply box so you can edit it. Nothing is sent until you press Send.'
                                         }
                                     >
                                         {waiting ? <HourglassIcon className="h-3 w-3 mr-1" /> : <CheckIcon className="h-3 w-3 mr-1" />}
-                                        {waiting ? 'Accept (send after the action is done)' : 'Accept'}
+                                        {waiting ? 'Use this draft (send after the action is done)' : 'Use this draft'}
                                     </Button>
                                     <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onRetry} disabled={!aiConfigured}>
                                         <RefreshCwIcon className="h-3 w-3 mr-1" /> {needsRewrite ? 'Redraft' : 'Retry'}

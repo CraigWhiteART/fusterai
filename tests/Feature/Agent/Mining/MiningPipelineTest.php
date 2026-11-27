@@ -175,6 +175,11 @@ test('a full run extracts, clusters, synthesises, profiles the voice and emits p
     expect($summary->evidence['inconsistencies'][0]['topic'])->toBe('refund_window')
         ->and($summary->evidence['inconsistencies'][0]['most_recent'])->toBe('Refunds within 30 days.')
         ->and($summary->changes->first()->ops[0]['body'])->toBe('Refunds within 30 days of delivery.')
+        // The point is linked to the change that answers it, so the review screen can show them together.
+        ->and($summary->evidence['inconsistencies'][0]['knowledge'])->toEqual([
+            'title' => $summary->changes->first()->ops[0]['title'],
+            'body' => 'Refunds within 30 days of delivery.',
+        ])
         // ...and not twice: the situation proposal leaves the disputed item out.
         ->and($refund->changes->where('target_type', 'knowledge')->map(fn ($c) => $c->ops[0]['title'])->all())->not->toContain('Refund window');
 

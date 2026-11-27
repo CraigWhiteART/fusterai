@@ -459,6 +459,65 @@ class ProposalService
         return $this->rewriteWithExclusions($proposal, $input, $left);
     }
 
+    /** Ops a reviewer may reword, and the text fields of each. */
+    public const EDITABLE_OPS = [
+        'create_knowledge' => ['title', 'body'],
+        'add_rule' => ['if', 'then'],
+        'replace_rule' => ['if', 'then'],
+    ];
+
+    /**
+     * A reviewer rewords one op before approving: only the text fields of
+     * a create_knowledge (title, body) or add_rule / replace_rule (if, then)
+     * op change. Everything is re-validated against the live versions and
+     * the review restarts, exactly as after exclude().
+     *
+     * @param  array<string, mixed>  $fields  only the keys of EDITABLE_OPS for that op are read
+     *
+     * @throws InvalidProposalException unknown change / op, an op that cannot be edited, or text that does not validate
+     * @throws ProposalStateException not_open | gate_running
+     */
+    public function editChange(Proposal $proposal, int $changeId, int $opIndex, array $fields): Proposal
+    {
+        $this->assertOpen($proposal);
+        $this->assertGateIdle($proposal);
+        $proposal->load('changes');
+
+        $input = $this->changeInput($proposal);
+        $position = (int) array_search($changeId, $proposal->changes->pluck('id')->all(), true);
+        $op = $proposal->changes->contains('id', $changeId) ? ($input[$position]['ops'][$opIndex] ?? null) : null;
+        if (! is_array($op)) {
+            throw new InvalidProposalException(["op {$opIndex} of change {$changeId} is not part of this proposal."]);
+        }
+        $allowed = self::EDITABLE_OPS[(string) ($op['op'] ?? '')] ?? null;
+        if ($allowed === null) {
+            throw new InvalidProposalException(['This kind of change cannot be edited here. Leave it out, or reject the proposal.']);
+        }
+
+        $edited = [...$op, ...array_intersect_key($fields, array_flip($allowed))];
+        if ($edited === $op) {
+            return $proposal;
+        }
+        $input[$position]['ops'][$opIndex] = $edited;
+
+        $updated = $this->rewriteWithExclusions($proposal, $input, array_values((array) ($proposal->excluded ?? [])));
+
+        // Mining links a disputed knowledge item to its evidence by title and body: keep the link.
+        $evidence = (array) ($updated->evidence ?? []);
+        if ($op['op'] === 'create_knowledge' && is_array($evidence['inconsistencies'] ?? null)) {
+            $now = (array) ($updated->changes->get($position)->after ?? []);
+            foreach ($evidence['inconsistencies'] as $n => $inc) {
+                $link = is_array($inc) ? ($inc['knowledge'] ?? null) : null;
+                if (is_array($link) && ($link['title'] ?? null) === ($op['title'] ?? null) && ($link['body'] ?? null) === ($op['body'] ?? null)) {
+                    $evidence['inconsistencies'][$n]['knowledge'] = ['title' => $now['title'] ?? null, 'body' => $now['body'] ?? null];
+                }
+            }
+            $updated->forceFill(['evidence' => $evidence])->save();
+        }
+
+        return $updated;
+    }
+
     /**
      * @param  list<array<string, mixed>>  $input
      * @param  list<array<string, mixed>>  $excluded

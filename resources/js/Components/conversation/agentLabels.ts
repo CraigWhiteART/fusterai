@@ -14,21 +14,38 @@ const HANDOVER_LABELS: Record<string, string> = {
     order_email_mismatch: 'the order email does not match the sender, so order details were withheld',
     missing_evidence: 'evidence the playbook requires is missing',
     risk: 'a risk flag was raised',
-    writer: 'the writer asked for a human',
+    writer: 'the agent asked for a person',
     validation_failed: 'the draft failed validation after one rewrite',
     validator_error: 'the validator could not run',
     triage_error: 'the email could not be classified',
-    writer_error: 'the writer failed',
-    no_draft: 'the writer produced no reply',
+    writer_error: 'the agent could not write a reply because of a technical problem',
+    no_draft: 'the agent produced no reply',
     timeout: 'the run ran out of time',
 };
 
+/** `writer:<code>`: why the writer itself handed over. Mirrors HandoverReasons::WRITER_LABELS. */
+const WRITER_HANDOVER_LABELS: Record<string, string> = {
+    needs_human_decision: 'a person needs to make a decision',
+    policy_unclear: 'the instructions do not say what to do here',
+    missing_information: 'information needed for the answer is missing',
+    customer_requests_human: 'the customer asked for a person',
+    sensitive: 'the subject is sensitive',
+    other: 'the agent asked for a person',
+    writer_error: 'the agent could not write a reply because of a technical problem',
+    no_draft: 'the agent produced no reply',
+};
+
+const words = (code: string): string => code.replace(/_/g, ' ').replace(/:/g, ', ').trim();
+
+/** A sentence fragment in plain words; never shows a raw code. */
 export function handoverLabel(reason: string | null | undefined): string | null {
     if (!reason) return null;
     const [base, ...rest] = reason.split(':');
     const detail = rest.join(':');
-    const label = HANDOVER_LABELS[base] ?? base.replace(/_/g, ' ');
-    return detail ? `${label} (${detail.replace(/_/g, ' ')})` : label;
+    const label = HANDOVER_LABELS[base] ?? words(base);
+    if (!detail) return label;
+    if (base === 'writer' && WRITER_HANDOVER_LABELS[detail]) return WRITER_HANDOVER_LABELS[detail];
+    return `${label} (${words(detail)})`;
 }
 
 export function capitalise(text: string): string {

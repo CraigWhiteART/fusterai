@@ -411,8 +411,7 @@ class ProposalEmitter
             $s = (array) $situation->synthesis;
             $slug = (string) ($s['playbook_slug'] ?? $situation->key);
             foreach ((array) ($s['inconsistencies'] ?? []) as $inc) {
-                $item = $inc + ['situation' => $situation->key, 'situation_name' => $situation->name];
-                $list[] = $item;
+                $list[] = $inc + ['situation' => $situation->key, 'situation_name' => $situation->name];
 
                 // The disputed knowledge (or the most recent statement) for a human to confirm.
                 $knowledge = array_values(array_filter((array) ($s['knowledge'] ?? []), fn ($k) => ($k['topic'] ?? null) === $inc['topic']));
@@ -429,6 +428,10 @@ class ProposalEmitter
                 }
                 $candidate['scope'] = $scope;
                 $changes[] = ['target_type' => ProposalChange::TARGET_KNOWLEDGE, 'target_id' => null, 'ops' => [$this->knowledgeOp($candidate)]];
+                // Which change answers this point (title and body as the proposal stores them), so the
+                // review screen shows the competing statements on that change. Kept in step by editChange().
+                $title = trim((string) ($candidate['title'] ?? ''));
+                $list[array_key_last($list)]['knowledge'] = ['title' => $title !== '' ? $title : null, 'body' => trim((string) $candidate['body'])];
             }
         }
 

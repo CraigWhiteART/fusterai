@@ -134,6 +134,7 @@ Route::middleware('auth')->prefix('agent')->name('agent.')->group(function () {
     Route::post('/proposals/{proposal}/gate', [$proposals, 'gate'])->whereNumber('proposal')->middleware('throttle:10,1')->name('proposals.gate');
     Route::post('/proposals/{proposal}/exclude', [$proposals, 'exclude'])->whereNumber('proposal')->middleware('throttle:30,1')->name('proposals.exclude');
     Route::post('/proposals/{proposal}/exclusions/restore', [$proposals, 'restoreExclusions'])->whereNumber('proposal')->middleware('throttle:30,1')->name('proposals.exclusions.restore');
+    Route::post('/proposals/{proposal}/changes/{change}', [$proposals, 'editChange'])->whereNumber(['proposal', 'change'])->middleware('throttle:30,1')->name('proposals.changes.update');
     Route::post('/proposals/{proposal}/approve', [$proposals, 'approve'])->whereNumber('proposal')->name('proposals.approve');
     Route::post('/proposals/{proposal}/reject', [$proposals, 'reject'])->whereNumber('proposal')->name('proposals.reject');
     Route::post('/proposals/{proposal}/rebase', [$proposals, 'rebase'])->whereNumber('proposal')->name('proposals.rebase');

@@ -182,8 +182,35 @@ class ProposalController extends AgentController
             fn () => $proposals->restoreExclusions($proposal, array_values((array) ($data['ids'] ?? []))));
     }
 
-    /** @param  callable(): Proposal  $change */
-    private function rewrite(Request $request, Proposal $proposal, ConflictChecker $checker, SimulationService $simulations, bool $recheck, callable $change): JsonResponse
+    /**
+     * A reviewer rewords one item before approving: the title / body of a
+     * create_knowledge op, or the if / then of an add_rule / replace_rule
+     * op (`op_index` into the change's `ops`, default 0). Re-validated and
+     * re-checked like an exclusion.
+     */
+    public function editChange(Request $request, Proposal $proposal, string $change, ProposalService $proposals, ConflictChecker $checker, SimulationService $simulations): JsonResponse
+    {
+        $this->manage($request, $proposal);
+        $data = $request->validate([
+            'op_index' => ['nullable', 'integer', 'min:0'],
+            'title' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'body' => ['sometimes', 'required', 'string', 'max:20000'],
+            'if' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'then' => ['sometimes', 'required', 'string', 'max:1000'],
+            'recheck' => ['nullable', 'boolean'],
+        ]);
+        $fields = array_intersect_key($data, array_flip(['title', 'body', 'if', 'then']));
+
+        return $this->rewrite($request, $proposal, $checker, $simulations, (bool) ($data['recheck'] ?? true),
+            fn () => $proposals->editChange($proposal, (int) $change, (int) ($data['op_index'] ?? 0), $fields),
+            ['That edit does not work as it stands.', 'invalid_edit']);
+    }
+
+    /**
+     * @param  callable(): Proposal  $change
+     * @param  array{0: string, 1: string}  $invalid  message and reason when what results does not validate
+     */
+    private function rewrite(Request $request, Proposal $proposal, ConflictChecker $checker, SimulationService $simulations, bool $recheck, callable $change, array $invalid = ['What would be left does not apply as it stands.', 'invalid_remainder']): JsonResponse
     {
         $hadPreview = $proposal->run_id !== null && $proposal->preview !== null;
         $hadGate = $proposal->gate_simulation_id !== null;
@@ -191,7 +218,7 @@ class ProposalController extends AgentController
         try {
             $updated = $change();
         } catch (InvalidProposalException $e) {
-            return response()->json(['message' => 'What would be left does not apply as it stands.', 'reason' => 'invalid_remainder', 'errors' => ['ops' => $e->errors],
+            return response()->json(['message' => $invalid[0], 'reason' => $invalid[1], 'errors' => ['ops' => $e->errors],
                 'proposal' => LoopPresenter::proposal($proposal->fresh() ?? $proposal)], 422);
         } catch (ProposalStateException $e) {
             return $this->state($e, $proposal);

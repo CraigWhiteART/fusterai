@@ -184,6 +184,20 @@ export interface ProposalApplied {
     restored?: Record<string, unknown>;
 }
 
+/** An item a reviewer left out of an open proposal (`proposal.excluded`); `id` puts it back. */
+export interface ProposalExcluded {
+    id: string;
+    kind: 'change' | 'op' | string;
+    target_type: ChangeTargetType | string;
+    target_id: number | null;
+    target_label?: string | null;
+    op_index?: number;
+    ops?: Record<string, unknown>[];
+    excluded_by?: number | null;
+    excluded_at?: string | null;
+    note?: string | null;
+}
+
 /** Free-form provenance; these are the conventional keys (mining adds more). */
 export interface ProposalEvidence {
     conversation_ids?: number[];
@@ -226,6 +240,8 @@ export interface Proposal {
     /** Full Preview on show / preview; a short {status, run_id, ...} in lists. */
     preview: Preview | null;
     applied: ProposalApplied | null;
+    /** What the reviewer left out (restorable while the proposal is open). */
+    excluded?: ProposalExcluded[];
     review_note: string | null;
     created_by: number | null;
     reviewed_by: number | null;
@@ -527,6 +543,8 @@ export interface MiningInconsistency {
     recommendation?: string | null;
     situation?: string | null;
     situation_name?: string | null;
+    /** The knowledge change that answers this point (title and body as the proposal stores them); absent on older runs. */
+    knowledge?: { title?: string | null; body?: string | null } | null;
     versions?: { statement?: string; evidence?: number[]; last_seen?: string | null }[];
 }
 

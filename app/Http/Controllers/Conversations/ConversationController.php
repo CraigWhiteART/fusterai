@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Conversations;
 
+use App\Domains\Agent\Support\InboxMarkers;
 use App\Domains\Conversation\Models\Conversation;
 use App\Domains\Conversation\Models\CustomView;
 use App\Domains\Conversation\Models\Folder;
@@ -149,12 +150,16 @@ class ConversationController extends Controller
             ->whereIn('conversation_id', $convIds)
             ->pluck('last_read_at', 'conversation_id');
 
-        $conversations->getCollection()->transform(function (Conversation $conv) use ($readMap) {
+        // Where the AI agent got to on each row: a draft waiting, or handed to a person.
+        $agentMarkers = InboxMarkers::for($conversations->getCollection());
+
+        $conversations->getCollection()->transform(function (Conversation $conv) use ($readMap, $agentMarkers) {
             $lastRead = $readMap->get($conv->id);
             // Imported history is never "new" mail, even though nobody opened it here.
             $conv->is_unread = ! $conv->imported && ($lastRead === null
                 ? $conv->last_reply_at !== null
                 : ($conv->last_reply_at !== null && $conv->last_reply_at->gt($lastRead)));
+            $conv->setAttribute('agent_marker', $agentMarkers[$conv->id] ?? null);
 
             return $conv;
         });

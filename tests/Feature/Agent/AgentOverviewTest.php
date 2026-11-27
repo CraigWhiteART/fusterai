@@ -5,7 +5,9 @@ use App\Domains\Agent\Models\AgentSetting;
 use App\Domains\Agent\Models\FeedbackEvent;
 use App\Domains\Agent\Models\KnowledgeItem;
 use App\Domains\Agent\Models\Playbook;
+use App\Domains\Agent\Pipeline\HandoverReasons;
 use App\Domains\Agent\Services\AgentBootstrapper;
+use App\Domains\Agent\Tools\HandoverTool;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Support\Str;
@@ -123,4 +125,26 @@ test('the overview handles a workspace with no runs', function () {
             ->where('cost.per_run_usd', null)
             ->where('connections.shopify', false)
             ->etc());
+});
+
+test('handover reasons read as plain words, never as codes in brackets', function () {
+    $workspace = Workspace::factory()->create();
+    $admin = User::factory()->create(['workspace_id' => $workspace->id, 'role' => 'admin']);
+    agentTOverviewRun($workspace->id, ['decision' => 'handover', 'handover_reason' => 'writer:writer_error']);
+    agentTOverviewRun($workspace->id, ['decision' => 'handover', 'handover_reason' => 'writer:writer_error']);
+    agentTOverviewRun($workspace->id, ['decision' => 'handover', 'handover_reason' => 'writer:needs_human_decision']);
+
+    $this->actingAs($admin)->get('/agent')->assertOk()->assertInertia(fn (AssertableInertia $page) => $page
+        ->where('runs.top_handover_reasons.0.label', 'the agent could not write a reply because of a technical problem')
+        ->where('runs.top_handover_reasons.1.label', 'a person needs to make a decision')
+        ->etc());
+
+    foreach (HandoverTool::REASONS as $code) {
+        expect(HandoverReasons::label("writer:{$code}"))->not->toContain('(')->not->toContain('_');
+    }
+    // Codes nobody listed still come out readable.
+    expect(HandoverReasons::label('writer:something_new'))->toBe('the agent asked for a person (something new)')
+        ->and(HandoverReasons::label('brand_new_reason'))->toBe('brand new reason')
+        ->and(HandoverReasons::label('risk:prompt_injection'))->toBe('a risk flag was raised (prompt injection)')
+        ->and(HandoverReasons::label('no_instruction'))->toBe('no playbook covers this situation');
 });

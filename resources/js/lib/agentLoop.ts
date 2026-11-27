@@ -152,7 +152,11 @@ export function toApiError(error: unknown): ApiError {
     const body = (e?.response?.data && typeof e.response.data === 'object' ? e.response.data : null) as StateConflictBody | null;
     const reason = typeof body?.reason === 'string' ? body.reason : null;
     const errors = body?.errors && typeof body.errors === 'object' ? body.errors : {};
-    const firstError = Object.values(errors).flat()[0];
+    // Op errors arrive as "changes.3.ops.0: text is required.": the path means nothing to a reader.
+    const firstError = Object.values(errors)
+        .flat()[0]
+        ?.replace(/^changes\.\d+(?:\.ops\.\d+)?:\s*/, '')
+        .replace(/^\w/, (c) => c.toUpperCase());
     let message =
         (reason && REASON_TEXT[reason]) ||
         firstError ||
@@ -212,6 +216,18 @@ export const loopApi = {
         post<{ proposal: Proposal }>(`/agent/proposals/${id}/resolve-conflict`, clean(body)).then((r) => r.proposal),
     preview: (id: number) => post<{ proposal: Proposal }>(`/agent/proposals/${id}/preview`).then((r) => r.proposal),
     gate: (id: number) => post<{ simulation: Simulation; proposal: Proposal }>(`/agent/proposals/${id}/gate`),
+    /** Leave whole changes, or single ops of a change, out of an open proposal. */
+    exclude: (id: number, body: { change_ids?: number[]; ops?: { change_id: number; op_index: number }[]; recheck?: boolean }) =>
+        post<{ proposal: Proposal }>(`/agent/proposals/${id}/exclude`, body).then((r) => r.proposal),
+    /** Put left-out items back (`excluded[].id`). */
+    restoreExclusions: (id: number, ids: string[], recheck = true) =>
+        post<{ proposal: Proposal }>(`/agent/proposals/${id}/exclusions/restore`, { ids, recheck }).then((r) => r.proposal),
+    /** Reword one item: title / body of new knowledge, or if / then of a playbook rule. */
+    editChange: (
+        id: number,
+        changeId: number,
+        body: { op_index?: number; title?: string | null; body?: string; if?: string | null; then?: string; recheck?: boolean },
+    ) => post<{ proposal: Proposal }>(`/agent/proposals/${id}/changes/${changeId}`, body).then((r) => r.proposal),
     approve: (id: number, note?: string) =>
         post<{ proposal: Proposal }>(`/agent/proposals/${id}/approve`, clean({ note })).then((r) => r.proposal),
     reject: (id: number, note?: string) =>

@@ -186,6 +186,9 @@ public function revert(Proposal $proposal, int $userId): Proposal;     // @throw
 /** Partial approval: leave changes / single ops out (re-validates what is left, like a rebase). */
 public function exclude(Proposal $proposal, array $changeIds, array $ops, int $userId, ?string $note = null): Proposal; // $ops: [{change_id, op_index}]
 public function restoreExclusions(Proposal $proposal, array $ids = []): Proposal; // [] = restore all
+
+/** A reviewer rewords one op: title/body of create_knowledge, if/then of add_rule / replace_rule (EDITABLE_OPS). Re-validates like exclude(). */
+public function editChange(Proposal $proposal, int $changeId, int $opIndex, array $fields): Proposal; // @throws InvalidProposalException|ProposalStateException
 ```
 
 Behaviour:
@@ -259,6 +262,15 @@ A reviewer can leave out whole changes, or single ops inside a change, before ap
 - Every excluded item is recorded in `proposal.excluded` and, on approval, copied to `applied.excluded`, so the applied summary shows what was left out (nothing of it is written).
 - `POST /agent/proposals/{id}/exclusions/restore` puts items back (some or all). Restored ops are appended to their target's change (ops of a new playbook go back into its `create_playbook` change).
 - Refused: leaving nothing (`422 reason: invalid_remainder`: reject the proposal instead), ids that are not part of the proposal (422), a remainder that no longer validates, e.g. excluding a `create_playbook` that knowledge in the same proposal is scoped to (`422 reason: invalid_remainder, errors.ops`), a running gate (`409 gate_running`: wait or pause it), a closed proposal (`409 not_open`).
+
+### Editing an item before approving
+
+A reviewer can reword single items instead of rejecting a proposal over its wording:
+
+- `POST /agent/proposals/{id}/changes/{change_id}` rewrites the text of one op: `title` / `body` of a `create_knowledge` op, or `if` / `then` of an `add_rule` / `replace_rule` op (`ProposalService::EDITABLE_OPS`). Nothing else of the op (kind, scope, rule id) or of the proposal can be changed this way; other ops are refused (`422 reason: invalid_edit`).
+- It goes through `replaceChanges`, so it behaves like an exclusion: everything is re-validated against the current live versions, the proposal goes back to `draft`, the gate is detached, the preview is cleared and the conflict check runs again (unless `recheck: false`). Change ids are renewed. An edit that changes nothing leaves the proposal alone.
+- Mining links each disputed knowledge item to its evidence (`evidence.inconsistencies[].knowledge = {title, body}`, see docs/agent-mining.md); an edit keeps that link pointing at the edited item.
+- Refused: text that does not validate, e.g. a rule that already exists (`422 reason: invalid_edit, errors.ops`), a running gate (`409 gate_running`), a closed proposal (`409 not_open`).
 
 ---
 
@@ -390,6 +402,7 @@ Preview = {
 - **`POST /agent/proposals/{id}/gate`** (throttle 10/min) → `202 {simulation: Simulation, proposal}`; proposal → `testing` (straight to `ready` when no case is affected). A still-running earlier gate is cancelled.
 - **`POST /agent/proposals/{id}/exclude`** (throttle 30/min) body `{change_ids?: int[], ops?: [{change_id, op_index}], note?, recheck?: bool (default true)}` (at least one item; `op_index` = index into `changes[].ops`) → `{proposal}` (`Preview` on `preview`). See "Excluding changes". To batch several toggles send `recheck: false` and finish with `recheck: true` (or `POST .../check`).
 - **`POST /agent/proposals/{id}/exclusions/restore`** (throttle 30/min) body `{ids?: string[] (excluded[].id; omitted = all), recheck?: bool}` → `{proposal}`.
+- **`POST /agent/proposals/{id}/changes/{change_id}`** (throttle 30/min) body `{op_index?: int (default 0), title?: string|null, body?: string, if?: string|null, then?: string, recheck?: bool (default true)}` → `{proposal}` (`Preview` on `preview`). See "Editing an item before approving". `422 reason: invalid_edit` when the op is not editable, not part of the proposal, or the result does not validate.
 - **`POST /agent/proposals/{id}/approve`** body `{note?}` → `{proposal}` (`status: applied`). Runs the conflict check first if it never ran. 409 reasons: `stale` (proposal is now `stale`: rebase), `blocking_conflicts` (`context.conflicts`), `gate_running`, `not_open`.
 - **`POST /agent/proposals/{id}/reject`** body `{note?}` → `{proposal}` (`rejected`; the row is kept).
 - **`POST /agent/proposals/{id}/rebase`** → `{proposal}` (`draft`; ops re-validated against the current live versions; conflicts and gate cleared). `422 {reason: "rebase_failed", errors: {ops: [...]}, proposal}` when an op no longer applies (it stays `stale`).
