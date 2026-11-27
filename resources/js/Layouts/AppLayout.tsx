@@ -552,11 +552,11 @@ export default function AppLayout({ children, fullHeight, onCreateView }: AppLay
     }
 
     return (
-        <div className="flex h-full bg-muted/40 md:p-3 gap-0">
+        <div className="flex h-full bg-muted/40 gap-0">
             {/* Mobile sidebar backdrop */}
             {mobileOpen && <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileOpen(false)} />}
 
-            <div className="flex min-w-0 flex-1 rounded-none md:rounded-xl shadow-[0_2px_24px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_24px_rgba(0,0,0,0.28)] overflow-hidden">
+            <div className="flex min-w-0 flex-1 overflow-hidden">
                 <aside
                     className={cn(
                         'relative flex flex-col bg-sidebar text-sidebar-foreground transition-all duration-200 shrink-0 backdrop-blur-md',
