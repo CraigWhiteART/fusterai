@@ -401,6 +401,15 @@ test('a holding reply is a draft that waits for a teammate', function () {
         ->and($run->internal_note)->toContain('Cancel the order');
 });
 
+test('a reply that refers to the team needs a person even without the flag', function () {
+    $case = agentTCase('Can I get a discount?');
+    agentTFakeTriage('order_status');
+    agentTFakeWriter(['reply' => 'Hi Alex, a teammate will check and get back to you.']);
+    agentTFakeValidator('pass');
+
+    expect(agentTRunLive($case)->auto_send['blockers'])->toContain('needs_human');
+});
+
 test('required evidence that is missing is asked for in a draft that cannot auto-send', function () {
     $case = agentTCase('Hi, where is my parcel?');
     app(AgentBootstrapper::class)->ensureForWorkspace($case['workspace']->id);

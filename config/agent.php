@@ -3,7 +3,7 @@
 return [
     // Bump when the fixed instructions / message layout in PromptBuilder
     // change: it is part of every run's config_hash.
-    'prompt_template_version' => 'agent-v2',
+    'prompt_template_version' => 'agent-v3',
 
     // Transcript budget (approximate tokens, 4 chars ~ 1 token). The most
     // recent turns are kept verbatim; older turns are summarised or dropped.

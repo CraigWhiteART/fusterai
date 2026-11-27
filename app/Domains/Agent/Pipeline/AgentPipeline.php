@@ -47,6 +47,8 @@ use Throwable;
  */
 class AgentPipeline
 {
+    private const REFERS_TO_TEAM = '/\b(teammate|colleague|the team|our team|one of us)\b/i';
+
     private const STALE_RUNNING_SECONDS = 360;
 
     /** Stop before the job's 300s timeout; skip the rewrite past this. */
@@ -661,7 +663,10 @@ class AgentPipeline
         }
 
         $state['draft'] = trim((string) ($sub['reply'] ?? ''));
-        $state['needs_human'] = (bool) ($sub['needs_human'] ?? false);
+        // A reply that refers the matter to the team needs a person even when
+        // the writer forgot the flag: it must never be sent unattended.
+        $state['needs_human'] = (bool) ($sub['needs_human'] ?? false)
+            || preg_match(self::REFERS_TO_TEAM, (string) $state['draft']) === 1;
         $state['claims'] = array_values(array_map(fn ($claim) => [
             'text' => (string) ($claim['text'] ?? ''),
             'sources' => array_values(array_map('strval', (array) ($claim['sources'] ?? []))),
