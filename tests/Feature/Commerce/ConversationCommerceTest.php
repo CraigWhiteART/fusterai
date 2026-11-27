@@ -47,7 +47,9 @@ test('refreshing Shopify shows the order and that it was matched by the order nu
         ->assertJsonPath('shopify.order_email_matches', true)
         ->assertJsonPath('shopify.fulfilment_status', 'FULFILLED')
         ->assertJsonPath('shopify.tracking_number', '4PX00112233')
-        ->assertJsonPath('shopify.products.0.title', 'Arcade Cabinet');
+        ->assertJsonPath('shopify.products.0.title', 'Arcade Cabinet')
+        ->assertJsonPath('shopify.order_admin_url', 'https://test-shop.myshopify.com/admin/orders/99')
+        ->assertJsonPath('shopify.customer_admin_url', 'https://test-shop.myshopify.com/admin/customers/1');
 
     expect(ShopifySnapshot::where('conversation_id', $f['conversation']->id)->count())->toBe(1);
 });
@@ -88,6 +90,8 @@ test('no order for the customer is a clear state', function () {
         ->assertJsonPath('shopify.found', false)
         ->assertJsonPath('shopify.has_order', false)
         ->assertJsonPath('shopify.matched_by', null)
+        ->assertJsonPath('shopify.order_admin_url', null)
+        ->assertJsonPath('shopify.customer_admin_url', null)
         ->assertJsonPath('shopify.reason', 'No Shopify customer matched this email.');
 });
 

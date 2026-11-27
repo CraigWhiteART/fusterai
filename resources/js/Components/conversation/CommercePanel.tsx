@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangleIcon, PackageIcon, RefreshCwIcon, ShoppingBagIcon } from 'lucide-react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { AlertTriangleIcon, ExternalLinkIcon, PackageIcon, RefreshCwIcon, ShoppingBagIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface ShopifyOrder {
@@ -10,7 +10,10 @@ interface ShopifyOrder {
     order_email_matches: boolean | null;
     order_email: string | null;
     customer_name: string | null;
+    /** Shopify admin pages; null when the shop domain or the id is unknown. */
+    customer_admin_url: string | null;
     order_number: string | null;
+    order_admin_url: string | null;
     order_date: string | null;
     order_age_days: number | null;
     payment_status: string | null;
@@ -88,6 +91,22 @@ function RefreshButton({ busy, label, onClick }: { busy: boolean; label: string;
     );
 }
 
+/** Opens a Shopify admin page in a new tab. */
+function AdminLink({ href, title, children }: { href: string; title?: string; children: ReactNode }) {
+    return (
+        <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            title={title}
+            className="inline-flex max-w-full items-center gap-1 text-primary hover:underline"
+        >
+            <span className="truncate">{children}</span>
+            <ExternalLinkIcon className="h-3 w-3 shrink-0 opacity-70" />
+        </a>
+    );
+}
+
 const heading = 'text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70 flex items-center gap-1.5';
 
 /**
@@ -159,13 +178,26 @@ export default function CommercePanel({ conversationId, refreshKey = 0 }: { conv
                 ) : order.error && !order.found ? (
                     <p className="text-destructive">{order.reason ?? 'Shopify lookup failed.'}</p>
                 ) : !order.has_order ? (
-                    <p className="text-muted-foreground">
-                        <span className="font-medium text-foreground">No order found for this customer.</span>{' '}
-                        {order.reason ?? 'Shopify has no order for this email or any order number in the mail.'}
-                    </p>
+                    <div className="space-y-1">
+                        <p className="text-muted-foreground">
+                            <span className="font-medium text-foreground">No order found for this customer.</span>{' '}
+                            {order.reason ?? 'Shopify has no order for this email or any order number in the mail.'}
+                        </p>
+                        {order.customer_admin_url && (
+                            <AdminLink href={order.customer_admin_url}>{order.customer_name ?? 'Customer'} in Shopify</AdminLink>
+                        )}
+                    </div>
                 ) : (
                     <div className="space-y-1">
-                        <p className="text-sm font-semibold">{order.order_number}</p>
+                        <p className="text-sm font-semibold">
+                            {order.order_admin_url ? (
+                                <AdminLink href={order.order_admin_url} title="Open this order in Shopify">
+                                    {order.order_number}
+                                </AdminLink>
+                            ) : (
+                                order.order_number
+                            )}
+                        </p>
                         <p className="text-muted-foreground">
                             {order.matched_by === 'order_number'
                                 ? 'Matched by the order number in the email'
@@ -181,6 +213,16 @@ export default function CommercePanel({ conversationId, refreshKey = 0 }: { conv
                             </p>
                         )}
                         <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+                            {order.customer_admin_url && (
+                                <>
+                                    <dt className="text-muted-foreground">Customer</dt>
+                                    <dd className="min-w-0 truncate">
+                                        <AdminLink href={order.customer_admin_url} title="Open this customer in Shopify">
+                                            {order.customer_name ?? 'View in Shopify'}
+                                        </AdminLink>
+                                    </dd>
+                                </>
+                            )}
                             <dt className="text-muted-foreground">Fulfilment</dt>
                             <dd className="capitalize">{humanise(order.fulfilment_status)}</dd>
                             <dt className="text-muted-foreground">Payment</dt>

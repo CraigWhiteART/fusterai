@@ -80,7 +80,7 @@ class ConversationCommerceController extends Controller
 
         return [
             'configured' => ['shopify' => true, 'tracking' => $settings->trackingEnabled()],
-            'shopify' => $snapshot !== null ? $this->presentShopify($conversation, $snapshot) : null,
+            'shopify' => $snapshot !== null ? $this->presentShopify($conversation, $snapshot, $settings) : null,
             'tracking' => $tracking !== null ? array_merge($tracking->toUiArray(), [
                 'stalled' => $tracking->isStalled($staleDays),
             ]) : null,
@@ -94,7 +94,7 @@ class ConversationCommerceController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function presentShopify(Conversation $conversation, ShopifySnapshot $snapshot): array
+    private function presentShopify(Conversation $conversation, ShopifySnapshot $snapshot, CommerceSetting $settings): array
     {
         $payload = (array) ($snapshot->payload ?? []);
         $found = (bool) ($payload['found'] ?? false);
@@ -114,7 +114,9 @@ class ConversationCommerceController extends Controller
             'order_email_matches' => $emailMatches,
             'order_email' => $payload['order_email'] ?? null,
             'customer_name' => $payload['customer_name'] ?? null,
+            'customer_admin_url' => $found ? $this->adminUrl($settings, 'customers', $payload['shopify_customer_id'] ?? null) : null,
             'order_number' => $payload['order_number'] ?? null,
+            'order_admin_url' => $hasOrder ? $this->adminUrl($settings, 'orders', $payload['shopify_order_id'] ?? null) : null,
             'order_date' => $payload['order_date'] ?? null,
             'order_age_days' => $payload['order_age_days'] ?? null,
             'payment_status' => $payload['payment_status'] ?? null,
@@ -134,6 +136,20 @@ class ConversationCommerceController extends Controller
             'fetched_at' => $snapshot->fetched_at?->toIso8601String(),
             'error' => $snapshot->error,
         ];
+    }
+
+    /**
+     * Shopify admin page for a customer or order. The myshopify.com admin path
+     * redirects to admin.shopify.com, so the store handle is not needed.
+     */
+    private function adminUrl(CommerceSetting $settings, string $resource, mixed $gid): ?string
+    {
+        $domain = $settings->shopDomain();
+        if ($domain === null || ! is_string($gid) || ! preg_match('#^gid://shopify/\w+/(\d+)$#', $gid, $m)) {
+            return null;
+        }
+
+        return "https://{$domain}/admin/{$resource}/{$m[1]}";
     }
 
     /** How the lookup found the order: a number quoted in the mail, else the sender's email. */
