@@ -194,6 +194,8 @@ export interface AgentRunPayload {
         meta: Record<string, unknown>;
     };
     knowledge: { id: string; kind: string; title: string | null; body: string; scope: KnowledgeScope }[];
+    /** The customer's other conversations the agent was shown before writing. Absent on older runs. */
+    related_conversations?: { id: number; status: string; waiting_on_us: boolean }[];
     tokens: { in: number; out: number; cache_read: number; cache_write: number; reasoning: number };
     cost_micro_usd: number;
     cost_usd: number;

@@ -53,6 +53,16 @@ test('the policy gate decides', function (array $overrides, string $decision, ?s
         ->and($result['decision'])->not->toBe(PolicyGate::AUTO_SEND);
 })->with('gate cases');
 
+test('another open conversation waiting on staff never hands over; it only blocks auto-send, and a missing key blocks', function () {
+    $draft = PolicyGate::decide(agentTGate(['related_open_conversations' => true]));
+    expect($draft['decision'])->toBe('draft')->and($draft['reason'])->toBeNull();
+
+    $context = ['auto_send' => ['context_error' => false]];
+    expect(PolicyGate::autoSendBlockers(agentTGate([...$context, 'related_open_conversations' => true])))->toContain('related_open_conversations')
+        ->and(PolicyGate::autoSendBlockers(agentTGate($context)))->toContain('related_open_conversations')
+        ->and(PolicyGate::autoSendBlockers(agentTGate([...$context, 'related_open_conversations' => false])))->not->toContain('related_open_conversations');
+});
+
 test('rollout buckets are stable and spread over 0-99', function () {
     $buckets = collect(range(1, 500))->map(fn ($id) => PolicyGate::rolloutBucket($id));
 

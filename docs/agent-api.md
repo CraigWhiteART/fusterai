@@ -82,6 +82,8 @@ Returns the latest run of that purpose for the conversation.
     },
     "knowledge": [ { "id": "K12", "kind": "policy", "title": "...", "body": "...", "scope": { "playbooks": [], "products": [], "countries": [], "global": true } } ],
                                     // every knowledge item the writer saw (prefetched + searched)
+    "related_conversations": [ { "id": 812, "status": "open", "waiting_on_us": true } ],
+                                    // the same customer's other conversations the writer was shown ([] when none)
     "tokens": { "in": 4500, "out": 450, "cache_read": 0, "cache_write": 0, "reasoning": 0 },
     "cost_micro_usd": 17650,        // integer micro-dollars (config/agent.php prices)
     "cost_usd": 0.01765,

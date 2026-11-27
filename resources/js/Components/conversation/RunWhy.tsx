@@ -255,6 +255,30 @@ function AutoSendBlockers({ run }: { run: AgentRunPayload }) {
     );
 }
 
+/** The customer's other conversations the agent was shown before it wrote. */
+function RelatedLine({ run }: { run: AgentRunPayload }) {
+    const related = (Array.isArray(run.related_conversations) ? run.related_conversations : []).filter((r) => r && r.id);
+    if (related.length === 0) return null;
+    return (
+        <Section title="Other conversations from this customer it read">
+            <ul className="list-disc pl-4">
+                {related.map((r) => (
+                    <li key={r.id}>
+                        <Link href={`/conversations/${r.id}`} className="font-medium text-primary hover:underline">
+                            Conversation #{r.id}
+                        </Link>
+                        <span className="text-muted-foreground">
+                            {' '}
+                            · {r.status}
+                            {r.waiting_on_us ? ' · waiting on us' : ''}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        </Section>
+    );
+}
+
 /** Admins: open a new manager chat pre-filled with this conversation and run. */
 function AskManager({ run, conversationId }: { run: AgentRunPayload; conversationId?: number }) {
     if (!conversationId) return null;
@@ -358,6 +382,7 @@ function DraftWhyDetails({ run, isAdmin, conversationId, summary }: Props & { su
                 <PlaybookLine run={run} isAdmin={isAdmin} />
                 <RulesList run={run} isAdmin={isAdmin} />
                 <ClaimsList run={run} isAdmin={isAdmin} />
+                <RelatedLine run={run} />
                 <ValidatorLine run={run} />
                 <ActionsList run={run} />
                 <AutoSendBlockers run={run} />
@@ -383,6 +408,7 @@ export function HandoverWhy({ run, isAdmin, conversationId }: Props) {
                     </p>
                 )}
                 <PlaybookLine run={run} isAdmin={isAdmin} />
+                <RelatedLine run={run} />
                 <ValidatorLine run={run} />
                 <ActionsList run={run} />
                 <RunDetails run={run}>

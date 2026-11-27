@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link, usePage } from '@inertiajs/react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/Components/ui/avatar';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/Components/ui/dropdown-menu';
@@ -25,6 +26,8 @@ interface Props {
     selectedFolderIds?: number[];
     isFollowing?: boolean;
     survey?: SurveyData | null;
+    /** Rendered straight under the customer block (the customer's other conversations). */
+    afterCustomer?: ReactNode;
     onStatusChange: (status: string) => void;
     onPriorityChange: (priority: string) => void;
     onAssignChange: (userId: string) => void;
@@ -60,6 +63,7 @@ export default function ConversationInspector({
     selectedFolderIds = [],
     isFollowing = false,
     survey,
+    afterCustomer,
     onStatusChange,
     onPriorityChange,
     onAssignChange,
@@ -129,6 +133,8 @@ export default function ConversationInspector({
                     </Link>
                 )}
             </div>
+
+            {afterCustomer}
 
             {/* ── Conversation details ── */}
             <div className="px-4 py-4 border-b border-border space-y-4">

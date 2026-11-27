@@ -146,6 +146,8 @@ export interface Conversation {
     is_unread?: boolean;
     /** Inbox list only: where the AI agent got to (a draft waiting, or handed to a person). `label` is the plain reason. */
     agent_marker?: { state: 'draft_ready' | 'needs_you'; label: string | null } | null;
+    /** Inbox list only: how many other open conversations the same customer has. */
+    related_open_count?: number;
     created_at: string;
 
     // Relations

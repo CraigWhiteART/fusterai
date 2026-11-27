@@ -8,6 +8,7 @@ use App\Domains\Conversation\Models\CustomView;
 use App\Domains\Conversation\Models\Folder;
 use App\Domains\Conversation\Models\Tag;
 use App\Domains\Conversation\Support\ConversationDetailPresenter;
+use App\Domains\Conversation\Support\RelatedConversations;
 use App\Domains\Mailbox\Models\Mailbox;
 use App\Enums\ConversationPriority;
 use App\Enums\ConversationStatus;
@@ -38,6 +39,7 @@ class ConversationController extends Controller
     public function __construct(
         private ConversationService $service,
         private ConversationDetailPresenter $detail,
+        private RelatedConversations $related,
     ) {}
 
     public function index(ConversationIndexRequest $request): Response
@@ -152,14 +154,17 @@ class ConversationController extends Controller
 
         // Where the AI agent got to on each row: a draft waiting, or handed to a person.
         $agentMarkers = InboxMarkers::for($conversations->getCollection());
+        // "+2 open": the customer's other open conversations, one query for the page.
+        $relatedOpen = $this->related->openCounts($conversations->getCollection(), RelatedConversations::visibleMailboxIds($user));
 
-        $conversations->getCollection()->transform(function (Conversation $conv) use ($readMap, $agentMarkers) {
+        $conversations->getCollection()->transform(function (Conversation $conv) use ($readMap, $agentMarkers, $relatedOpen) {
             $lastRead = $readMap->get($conv->id);
             // Imported history is never "new" mail, even though nobody opened it here.
             $conv->is_unread = ! $conv->imported && ($lastRead === null
                 ? $conv->last_reply_at !== null
                 : ($conv->last_reply_at !== null && $conv->last_reply_at->gt($lastRead)));
             $conv->setAttribute('agent_marker', $agentMarkers[$conv->id] ?? null);
+            $conv->setAttribute('related_open_count', $relatedOpen[$conv->id] ?? 0);
 
             return $conv;
         });

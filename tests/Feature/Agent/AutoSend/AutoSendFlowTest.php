@@ -351,7 +351,7 @@ test('a proposed action that cannot run unattended keeps the reply a draft', fun
 
     $gate = PolicyGate::decide([
         'agent_mode' => 'live', 'kill_switch' => false, 'playbook' => ['mode' => 'auto', 'rollout_percent' => 100, 'always_human' => false],
-        'rollout_bucket' => 1, 'risk_flags' => [], 'writer_handover' => null, 'needs_human' => false, 'order_withheld' => false, 'missing_evidence' => [],
+        'rollout_bucket' => 1, 'risk_flags' => [], 'writer_handover' => null, 'needs_human' => false, 'related_open_conversations' => false, 'order_withheld' => false, 'missing_evidence' => [],
         'validator_passed' => true, 'validator_error' => false, 'has_draft' => true,
         'proposed_actions' => [['action' => 'refund', 'status' => 'proposed']], 'auto_send' => $context,
     ]);
@@ -367,6 +367,31 @@ test('chat conversations are not auto-sent unless the channel is enabled', funct
     $g = autoTWorkspace(['auto_send' => ['channels' => ['email', 'chat']]]);
     $g['conversation']->update(['channel_type' => 'chat']);
     expect(autoTRun($g['conversation'])->decision)->toBe('auto_send');
+});
+
+test('another open conversation from the customer that waits on staff keeps the reply a draft', function () {
+    $f = autoTWorkspace();
+    $sibling = Conversation::factory()->create([
+        'workspace_id' => $f['workspace']->id, 'mailbox_id' => $f['mailbox']->id, 'customer_id' => $f['customer']->id,
+        'subject' => 'New customer message', 'status' => 'open', 'last_reply_at' => now()->subMinutes(3),
+    ]);
+    Thread::factory()->create([
+        'conversation_id' => $sibling->id, 'customer_id' => $f['customer']->id, 'user_id' => null, 'type' => 'message',
+        'body' => '<p>Has my order shipped?</p>', 'body_plain' => 'Has my order shipped?', 'created_at' => now()->subMinutes(3),
+    ]);
+
+    $run = autoTRun($f['conversation']);
+
+    expect($run->decision)->toBe('draft')
+        ->and($run->auto_send['blockers'])->toBe(['related_open_conversations'])
+        ->and(autoTPending($f['conversation']))->toBeNull();
+    Bus::assertNotDispatched(SendReplyJob::class);
+
+    // Once staff answered the other conversation, nothing waits on them and the next message can be auto-sent.
+    loopTStaffReply($sibling, 'Yes, it shipped on Monday.');
+    autoTCustomerMessage($f['conversation'], 'Thanks, any tracking?');
+
+    expect(autoTRun($f['conversation'])->decision)->toBe('auto_send');
 });
 
 test('preview and simulation runs never auto-send', function () {

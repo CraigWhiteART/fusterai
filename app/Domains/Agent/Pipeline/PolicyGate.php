@@ -71,6 +71,7 @@ final class PolicyGate
      *     risk_flags: list<string>,
      *     writer_handover: string|null,
      *     needs_human?: bool,
+     *     related_open_conversations?: bool,
      *     order_withheld: bool,
      *     missing_evidence: list<string>,
      *     validator_passed: bool|null,
@@ -176,6 +177,9 @@ final class PolicyGate
         $check(($in['missing_evidence'] ?? ['unknown']) === [], 'missing_evidence');
         // A holding reply: the writer says a teammate must still decide or act.
         $check(($in['needs_human'] ?? true) === false, 'needs_human');
+        // The customer has another open conversation waiting on staff: the
+        // same question may be asked twice, so a person looks at them together.
+        $check(($in['related_open_conversations'] ?? true) === false, 'related_open_conversations');
         $check(($a['claims_grounded'] ?? false) === true, 'claims_ungrounded');
         // Action-dependent replies: auto-send only when every proposed action
         // is set to run unattended (policy `always`; computed in

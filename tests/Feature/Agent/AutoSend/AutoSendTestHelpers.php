@@ -97,6 +97,7 @@ function autoTGate(array $overrides = [], array $context = []): array
         'risk_flags' => [],
         'writer_handover' => null,
         'needs_human' => false,
+        'related_open_conversations' => false,
         'order_withheld' => false,
         'missing_evidence' => [],
         'validator_passed' => true,

@@ -10,6 +10,7 @@ import Composer, { ChatComposer, type ComposerHandle } from './Composer';
 import CommercePanel from './CommercePanel';
 import ConversationActions, { useConversationActions } from './ConversationActions';
 import { QaReviewNow, useConversationQa } from './ConversationQa';
+import { RelatedList, RelatedStrip } from './RelatedConversations';
 import SaveTestCase from './SaveTestCase';
 import TeachFromEdit from './TeachFromEdit';
 import ConversationHeader from './ConversationHeader';
@@ -67,6 +68,7 @@ export default function ConversationView({
 }: ConversationViewProps) {
     const { auth, aiConfigured = false } = usePage<PageProps & { aiConfigured?: boolean }>().props;
     const { conversation, isFollowing, folderIds } = detail;
+    const related = Array.isArray(detail.related) ? detail.related : [];
     const extra = useMemo(() => (detail.extra && !Array.isArray(detail.extra) ? detail.extra : {}), [detail.extra]);
     const commerceAssist = extra.commerceAssist;
     const survey = (extra.survey as SurveyData | null | undefined) ?? null;
@@ -267,6 +269,8 @@ export default function ConversationView({
                     onOpenMobileInspector={() => setMobileInspectorOpen(true)}
                 />
 
+                <RelatedStrip related={related} />
+
                 <ThreadList
                     conversation={conversation}
                     threads={threads}
@@ -348,6 +352,7 @@ export default function ConversationView({
                     selectedFolderIds={folderIds}
                     isFollowing={isFollowing}
                     survey={survey}
+                    afterCustomer={<RelatedList related={related} />}
                     onStatusChange={updateStatus}
                     onPriorityChange={updatePriority}
                     onAssignChange={assignTo}

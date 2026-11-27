@@ -36,6 +36,7 @@ The gate first applies every handover rule (kill switch, triage failure, no play
 | `validator` | validator passed |
 | `rewritten` | **the first draft passed with no rewrite** (decision: a draft that needed the validator's one rewrite is never auto-sent; it had a problem the validator caught, and the rewrite is a single structured call checked only once more) |
 | `risk_flags` | triage raised no risk flag (also a handover) |
+| `related_open_conversations` | the customer has no other open / pending conversation whose latest message is theirs (gate input `related_open_conversations`, from `RelatedConversations`; missing = blocked). The same question is often asked in two conversations, so a person looks at them together |
 | `claims_ungrounded` | every claim cites at least one source and every source is in the evidence ledger or the knowledge the writer saw |
 | `actions_pending` | no proposed action, or every proposed action can run unattended: its effective policy is `always` and the action type allows unattended runs (`auto_send.actions_unattended`, computed in `AutoSendContext`; missing = blocked). See below |
 | `language` | triage language is in `auto_send.allowed_languages` (default `en`; `unknown` never matches) |

@@ -100,6 +100,8 @@ const AUTO_SEND_BLOCKER_LABELS: Record<string, string> = {
     order_email_mismatch: 'The order email does not match the sender, so order details were left out.',
     missing_evidence: 'Something the playbook needs is missing (order details or photos), so the draft asks for it.',
     needs_human: 'A teammate still has to decide or do something. See the note.',
+    related_open_conversations:
+        'This customer has another open conversation waiting for a reply, so a person should look at them together.',
     claims_ungrounded: 'A fact in the draft is not backed by order data or knowledge.',
     actions_pending: 'The reply depends on a Shopify action.',
     language: 'The email is in a language not allowed for auto-send.',

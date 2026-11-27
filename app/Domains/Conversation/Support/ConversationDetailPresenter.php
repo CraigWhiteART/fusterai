@@ -16,12 +16,15 @@ use App\Support\Hooks;
  */
 class ConversationDetailPresenter
 {
+    public function __construct(private readonly RelatedConversations $related) {}
+
     /**
      * @return array{
      *     conversation: Conversation,
      *     isFollowing: bool,
      *     folderIds: list<int>,
      *     aiSuggestion: array{id: int, content: string, created_at: mixed}|null,
+     *     related: list<array<string, mixed>>,
      *     extra: array<string, mixed>,
      * }
      */
@@ -48,6 +51,8 @@ class ConversationDetailPresenter
                 'content' => $suggestion->content,
                 'created_at' => $suggestion->created_at,
             ] : null,
+            // The same customer's other conversations (strip above the thread, list in the side panel).
+            'related' => $this->related->for($conversation, mailboxIds: RelatedConversations::visibleMailboxIds($user)),
             // Module payloads (survey, sla, …). Controllers also spread
             // these at the top level for module components that read usePage().props.
             'extra' => Hooks::applyFilters('conversation.show.extra', [], $conversation),

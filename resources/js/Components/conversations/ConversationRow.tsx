@@ -147,6 +147,17 @@ export default function ConversationRow({
                                     </span>
                                 )}
 
+                                {(conversation.related_open_count ?? 0) > 0 && (
+                                    <span
+                                        className="inline-flex items-center text-[11px] text-muted-foreground font-medium px-1.5 py-0.5 rounded-md bg-muted/60"
+                                        title={`This customer has ${conversation.related_open_count} other open conversation${
+                                            conversation.related_open_count === 1 ? '' : 's'
+                                        }`}
+                                    >
+                                        +{conversation.related_open_count} open
+                                    </span>
+                                )}
+
                                 {(conversation.tags ?? []).slice(0, 2).map((tag) => (
                                     <span
                                         key={tag.id}

@@ -253,6 +253,12 @@ class AgentPipeline
         $tcfg = (array) config('agent.transcript', []);
         $rendered = $input->transcript->render((int) ($tcfg['max_tokens'] ?? 6000), (int) ($tcfg['verbatim_turns'] ?? 6), (int) ($tcfg['turn_max_chars'] ?? 4000));
         $trace['transcript'] = ['included' => $rendered['included'], 'summarised' => $rendered['summarised'], 'dropped' => $rendered['dropped']];
+        // The customer's other conversations the writer was shown ("Why this draft").
+        $trace['related_conversations'] = array_map(fn ($r) => [
+            'id' => (int) ($r['id'] ?? 0),
+            'status' => (string) ($r['status'] ?? ''),
+            'waiting_on_us' => (bool) ($r['waiting_on_us'] ?? false),
+        ], $input->relatedConversations);
 
         // 3. Triage
         $triage = $this->triage($input, $instructions, $untrusted, $rendered['text'], $meter, $trace);
@@ -753,6 +759,9 @@ class AgentPipeline
             'risk_flags' => $flags,
             'writer_handover' => $state['writer_handover'],
             'needs_human' => (bool) ($state['needs_human'] ?? false),
+            // The customer has another open conversation waiting on staff:
+            // a person should look at them together (blocks auto-send only).
+            'related_open_conversations' => $input->hasRelatedWaitingOnStaff(),
             'order_withheld' => (bool) $ledger->meta('order_withheld'),
             'missing_evidence' => $missing,
             'validator_passed' => $state['validator_passed'],

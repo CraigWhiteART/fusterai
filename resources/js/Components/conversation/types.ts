@@ -28,6 +28,25 @@ export interface AiDraft {
     created_at?: string;
 }
 
+/** One row of App\Domains\Conversation\Support\RelatedConversations::for(). */
+export interface RelatedConversation {
+    id: number;
+    subject: string;
+    status: 'open' | 'pending' | 'closed';
+    channel: string | null;
+    /** 'contact_form' when the customer wrote through a contact form; null when unknown. */
+    via: string | null;
+    last_activity_at: string | null;
+    last_customer_at: string | null;
+    last_customer_excerpt: string | null;
+    /** The last reply staff really sent (no notes, no AI drafts). */
+    last_staff_at: string | null;
+    last_staff_excerpt: string | null;
+    last_speaker: 'customer' | 'staff' | null;
+    /** Open or pending, and the customer wrote last. */
+    waiting_on_us: boolean;
+}
+
 /**
  * Payload built by App\Domains\Conversation\Support\ConversationDetailPresenter.
  * The split inbox receives it as `selected`, the deep-link page as `detail`.
@@ -37,6 +56,8 @@ export interface ConversationDetail {
     isFollowing: boolean;
     folderIds: number[];
     aiSuggestion: AiDraft | null;
+    /** The same customer's other conversations: open ones first, then closed ones from the last 30 days. */
+    related?: RelatedConversation[];
     /**
      * Module payloads from the `conversation.show.extra` filter (commerceAssist,
      * survey, sla, …). PHP sends `[]` when empty, hence the loose type.

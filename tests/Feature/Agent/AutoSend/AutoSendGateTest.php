@@ -24,6 +24,8 @@ dataset('single blockers', [
     'outside rollout' => [['rollout_bucket' => 60, 'playbook' => ['mode' => 'auto', 'rollout_percent' => 50, 'always_human' => false]], [], 'rollout'],
     'zero rollout' => [['rollout_bucket' => 0, 'playbook' => ['mode' => 'auto', 'rollout_percent' => 0, 'always_human' => false]], [], 'rollout'],
     'needed the rewrite' => [[], ['rewrites' => 1], 'rewritten'],
+    'holding reply for a teammate' => [['needs_human' => true], [], 'needs_human'],
+    'another open conversation waiting on staff' => [['related_open_conversations' => true], [], 'related_open_conversations'],
     'claim not grounded' => [[], ['claims_grounded' => false], 'claims_ungrounded'],
     'action proposed' => [['proposed_actions' => [['action' => 'refund', 'status' => 'proposed']]], [], 'actions_pending'],
     'language not allowed' => [[], ['language' => 'de'], 'language'],
@@ -83,6 +85,14 @@ test('missing context or missing keys fail closed', function () {
 
     expect($result['decision'])->toBe(PolicyGate::DRAFT)
         ->and($result['auto_send_blockers'])->toEqualCanonicalizing(['paused', 'human_replied', 'daily_cap']);
+
+    // Gate inputs outside the context fail closed too: no key = blocked.
+    $gate = autoTGate();
+    unset($gate['needs_human'], $gate['related_open_conversations']);
+    $result = PolicyGate::decide($gate);
+
+    expect($result['decision'])->toBe(PolicyGate::DRAFT)
+        ->and($result['auto_send_blockers'])->toBe(['needs_human', 'related_open_conversations']);
 });
 
 test('an exception inside the auto-send checks means draft', function () {

@@ -135,6 +135,8 @@ class RunController extends Controller
                 'meta' => $meta,
             ],
             'knowledge' => array_values($knowledge),
+            // The customer's other conversations the writer was shown: [{id, status, waiting_on_us}].
+            'related_conversations' => array_values((array) ($run->trace['related_conversations'] ?? [])),
             'tokens' => [
                 'in' => $run->tokens_in,
                 'out' => $run->tokens_out,
