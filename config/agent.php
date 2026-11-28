@@ -3,7 +3,53 @@
 return [
     // Bump when the fixed instructions / message layout in PromptBuilder
     // change: it is part of every run's config_hash.
-    'prompt_template_version' => 'agent-v4',
+    'prompt_template_version' => 'agent-v5',
+
+    // Inbox categories (App\Domains\Agent\Support\Categories): one per
+    // conversation, so staff can work through one kind of email at a time.
+    'categories' => [
+        'orders' => 'Orders & shipping',
+        'returns' => 'Returns & refunds',
+        'technical' => 'Technical',
+        'product' => 'Product questions',
+        'business' => 'Wholesale & partners',
+        'other' => 'Other',
+    ],
+
+    // Playbook slug => category. Matched by the exact slug, then by the part
+    // before the first dot (so `tracking.no_updates` needs only `tracking`);
+    // anything else is `other`. Add a line here when a new playbook is created.
+    'playbook_categories' => [
+        'order_status' => 'orders',
+        'preorder_status' => 'orders',
+        'tracking_problem' => 'orders',
+        'tracking' => 'orders',
+        'address_change' => 'orders',
+        'order_cancellation' => 'orders',
+        'cancel_order' => 'orders',
+        'cancellation' => 'orders',
+        'missing_items_in_shipment' => 'orders',
+        'missing_items' => 'orders',
+        'duties_tariffs' => 'orders',
+        'price_discrepancy' => 'orders',
+
+        // Damage ends in a replacement or a refund, so it sits with returns.
+        'refund_request' => 'returns',
+        'refund' => 'returns',
+        'return_request' => 'returns',
+        'damaged_product' => 'returns',
+        'damage' => 'returns',
+
+        'technical_support' => 'technical',
+
+        'product_question' => 'product',
+
+        'wholesale' => 'business',
+        'influencer' => 'business',
+
+        'spam' => 'other',
+        'other' => 'other',
+    ],
 
     // Transcript budget (approximate tokens, 4 chars ~ 1 token). The most
     // recent turns are kept verbatim; older turns are summarised or dropped.

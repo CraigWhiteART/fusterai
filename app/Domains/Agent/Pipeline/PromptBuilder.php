@@ -32,6 +32,14 @@ Return the customer's language, their sentiment, any risk flags, and the one pla
 
 Choose "none" when no playbook clearly fits. Never stretch a playbook to fit.
 
+Also return the category of the latest request. Always choose one, even when the playbook is "none":
+- orders: an order that has been placed: where it is, tracking, delivery, pre-orders, address changes, cancellations, missing items, customs or duties, what was charged
+- returns: returns, refunds, exchanges, warranty claims, and damaged or faulty items that need a replacement or a refund
+- technical: help with setting up, using or fixing a product (pairing, software, firmware, something not working as expected)
+- product: questions before buying: features, compatibility, stock, sizing, prices
+- business: wholesale, resellers, influencers, press, partnerships and suppliers
+- other: anything else, including spam, newsletters and automated mail
+
 Risk flags ({$flags}):
 - chargeback: mentions a chargeback, dispute, or contacting their bank/PayPal to reverse payment
 - legal: threatens legal action, consumer-affairs complaints, lawyers or regulators

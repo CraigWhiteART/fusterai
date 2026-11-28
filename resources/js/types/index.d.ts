@@ -140,6 +140,8 @@ export interface Conversation {
     channel_type: string;
     ai_summary?: string;
     ai_tags?: string[];
+    /** Set by the AI agent's triage: orders, returns, technical, product, business or other. */
+    agent_category?: string | null;
     last_reply_at?: string;
     snoozed_until?: string;
     starred?: boolean;

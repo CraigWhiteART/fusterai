@@ -7,7 +7,7 @@ import ConversationView from '@/Components/conversation/ConversationView';
 import type { AgentOption, ConversationDetail } from '@/Components/conversation/types';
 import ConversationRow from '@/Components/conversations/ConversationRow';
 import InboxBulkBar from '@/Components/conversations/InboxBulkBar';
-import InboxFilters, { type InboxFilterValues } from '@/Components/conversations/InboxFilters';
+import InboxFilters, { type InboxCategory, type InboxFilterValues } from '@/Components/conversations/InboxFilters';
 import NewConversationModal from '@/Components/conversations/NewConversationModal';
 import ShortcutsModal from '@/Components/conversations/ShortcutsModal';
 import ViewBuilderModal from '@/Components/ViewBuilderModal';
@@ -23,6 +23,8 @@ interface Props {
     tags: Tag[];
     folders: Folder[];
     counts: Record<string, number>;
+    /** The agent's categories, each with its count for the current filters. */
+    categories: InboxCategory[];
     filters: InboxFilterValues;
     /** The conversation open in the right pane (same shape as Show's `detail`). */
     selected?: ConversationDetail | null;
@@ -30,7 +32,7 @@ interface Props {
     activeView?: { id: number; name: string; color: string; filters: CustomView['filters'] } | null;
 }
 
-const LIST_PROPS = ['conversations', 'counts'];
+const LIST_PROPS = ['conversations', 'counts', 'categories'];
 
 const headerIconButton =
     'h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors';
@@ -41,6 +43,7 @@ export default function ConversationsIndex({
     tags,
     folders,
     counts,
+    categories,
     filters,
     selected,
     agents,
@@ -69,6 +72,7 @@ export default function ConversationsIndex({
     const allIds = conversations.data.map((c) => c.id);
     const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
     const currentSelectedId = selected?.conversation.id ?? null;
+    const categoryLabels = Object.fromEntries(categories.map((category) => [category.key, category.label]));
 
     useConversationListShortcuts({
         conversationIds: allIds,
@@ -150,6 +154,14 @@ export default function ConversationsIndex({
             { ...filters, conversation: id === null ? undefined : String(id) },
             { preserveState: true, preserveScroll: true, replace: true },
         );
+    }
+
+    // Working through a batch: after a reply is sent or the conversation is closed,
+    // open the one below it in the list as it was filtered when the action started.
+    // At the bottom of the page the pane is cleared rather than wrapping to the top.
+    function selectNext() {
+        const index = currentSelectedId === null ? -1 : allIds.indexOf(currentSelectedId);
+        selectConversation(index >= 0 && index < allIds.length - 1 ? allIds[index + 1] : null);
     }
 
     // Agent default: open list scoped to self unless an explicit assignment filter is provided.
@@ -267,6 +279,7 @@ export default function ConversationsIndex({
                         <InboxFilters
                             filters={filters}
                             counts={counts}
+                            categories={categories}
                             isAgent={isAgent}
                             mailboxes={mailboxes}
                             tags={tags}
@@ -318,6 +331,7 @@ export default function ConversationsIndex({
                                             onCheck={(e) => toggleSelect(conv.id, e)}
                                             onClick={() => selectConversation(conv.id)}
                                             onStar={(e) => handleStar(conv, e)}
+                                            categoryLabel={conv.agent_category ? categoryLabels[conv.agent_category] : undefined}
                                         />
                                     );
                                 })
@@ -413,6 +427,7 @@ export default function ConversationsIndex({
                                 detailProp="selected"
                                 listProps={LIST_PROPS}
                                 onLeave={() => selectConversation(null)}
+                                onHandled={selectNext}
                             />
                         )}
                     </div>

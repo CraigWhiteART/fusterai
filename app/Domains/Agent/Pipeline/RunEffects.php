@@ -105,6 +105,21 @@ class RunEffects
     }
 
     /**
+     * The inbox category from triage (App\Domains\Agent\Support\Categories),
+     * written as soon as triage answers. Saved quietly: a category is not a
+     * change anyone is notified about, and it is not in the search index.
+     */
+    public function categorise(AgentRun $run, Conversation $conversation, string $category): void
+    {
+        if (! $run->isLive()) {
+            throw new LogicException("Run {$run->id} has purpose [{$run->purpose}]: only live runs may change a conversation.");
+        }
+        if ($conversation->agent_category !== $category) {
+            $conversation->forceFill(['agent_category' => $category])->saveQuietly();
+        }
+    }
+
+    /**
      * An auto-send whose actions were just recorded: if any of them needs a
      * human (approval route), failed, or was never recorded, the reply is
      * downgraded to a normal draft (the approval card / rewrite flag shows

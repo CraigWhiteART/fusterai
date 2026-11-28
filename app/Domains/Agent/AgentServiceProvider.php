@@ -26,7 +26,7 @@ class AgentServiceProvider extends ServiceProvider
     public function boot(): void
     {
         if ($this->app->runningInConsole()) {
-            $this->commands([ImportLegacyCommand::class]);
+            $this->commands([ImportLegacyCommand::class, Console\CategoriseCommand::class]);
             // History mining (app/Domains/Agent/Mining, docs/agent-mining.md).
             $this->commands([Mining\Console\MineCommand::class]);
         }

@@ -50,6 +50,8 @@ interface ComposerProps {
      * a reply then asks for confirmation first (the server does not block it).
      */
     sendWarning?: string | null;
+    /** Called once a reply or note has been sent (or scheduled). */
+    onSent?: (type: ReplyType) => void;
 }
 
 /** Email composer: Reply/Note tabs, Tiptap editor, "/" saved replies, attachments, Send Later. */
@@ -65,6 +67,7 @@ export default function Composer({
     onRequestAi,
     before,
     sendWarning,
+    onSent,
 }: ComposerProps) {
     const [type, setType] = useState<ReplyType>('message');
     const [expanded, setExpanded] = useState(defaultExpanded);
@@ -163,6 +166,7 @@ export default function Composer({
                 setSendLaterAt('');
                 setSendLaterOpen(false);
                 setExpanded(defaultExpanded);
+                onSent?.(type);
             },
             onError: (errors) => setError(firstError(errors)),
             onFinish: () => setSending(false),

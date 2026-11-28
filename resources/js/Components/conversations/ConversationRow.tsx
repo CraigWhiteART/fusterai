@@ -21,8 +21,11 @@ export default function ConversationRow({
     onCheck,
     onClick,
     onStar,
+    categoryLabel,
 }: {
     conversation: Conversation;
+    /** The agent's category for this conversation, when it has one. */
+    categoryLabel?: string;
     isSelected: boolean;
     isChecked: boolean;
     onCheck: (e: React.MouseEvent) => void;
@@ -31,6 +34,10 @@ export default function ConversationRow({
 }) {
     const isSnoozed = conversation.snoozed_until && new Date(conversation.snoozed_until) > new Date();
     const marker = conversation.agent_marker ?? null;
+    // Tags the old auto-tagger added are recorded in ai_tags: the category replaces
+    // them here. Tags a person or an automation rule added are still shown.
+    const machineTags = new Set((conversation.ai_tags ?? []).map((name) => name.trim().toLowerCase()));
+    const tags = (conversation.tags ?? []).filter((tag) => !machineTags.has(tag.name.toLowerCase()));
 
     return (
         <div
@@ -158,7 +165,16 @@ export default function ConversationRow({
                                     </span>
                                 )}
 
-                                {(conversation.tags ?? []).slice(0, 2).map((tag) => (
+                                {categoryLabel && (
+                                    <span
+                                        className="inline-flex items-center text-[11px] text-muted-foreground font-medium px-1.5 py-0.5 rounded-md border border-border"
+                                        title="Category chosen by the AI agent"
+                                    >
+                                        {categoryLabel}
+                                    </span>
+                                )}
+
+                                {tags.slice(0, 2).map((tag) => (
                                     <span
                                         key={tag.id}
                                         className="text-[11px] px-1.5 py-0.5 rounded-md font-medium"

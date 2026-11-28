@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Conversations;
 
+use App\Domains\Agent\Support\Categories;
 use App\Domains\Agent\Support\InboxMarkers;
 use App\Domains\Conversation\Models\Conversation;
 use App\Domains\Conversation\Models\CustomView;
@@ -28,6 +29,7 @@ use App\Models\ConversationRead;
 use App\Models\User;
 use App\Services\ConversationService;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -131,6 +133,24 @@ class ConversationController extends Controller
             $query->whereDate('created_at', '<=', $dateTo);
         }
 
+        // "Draft ready": the same rule as the row badge (InboxMarkers).
+        if ($request->boolean('draft_ready')) {
+            InboxMarkers::whereDraftReady($query);
+        }
+
+        // Category chips: a count per category for everything the other
+        // filters leave, in one grouped query, before the category filter.
+        $categories = $this->categoryCounts($query);
+
+        $category = $request->get('category');
+        if ($category === Categories::OTHER) {
+            // Conversations the agent has not looked at count as "Other".
+            $named = array_values(array_diff(Categories::keys(), [Categories::OTHER]));
+            $query->where(fn ($q) => $q->whereNull('agent_category')->orWhereNotIn('agent_category', $named));
+        } elseif (Categories::isValid($category)) {
+            $query->where('agent_category', $category);
+        }
+
         // The conversation open in the split pane. Opening it marks it read, as the
         // deep-link page does, so do that before the list computes is_unread.
         $selected = null;
@@ -181,9 +201,10 @@ class ConversationController extends Controller
             'tags' => $tags,
             'folders' => $folders,
             'counts' => $counts,
+            'categories' => $categories,
             'agents' => $agents,
             'selected' => $selected,
-            'filters' => $request->only(['status', 'mailbox', 'assigned', 'tag', 'priority', 'conversation', 'date_from', 'date_to', 'view', 'starred']),
+            'filters' => $request->only(['status', 'mailbox', 'assigned', 'tag', 'priority', 'conversation', 'date_from', 'date_to', 'view', 'starred', 'category', 'draft_ready']),
             'activeView' => $activeView ? [
                 'id' => $activeView->id,
                 'name' => $activeView->name,
@@ -192,6 +213,34 @@ class ConversationController extends Controller
             ] : null,
             ...($selected['extra'] ?? []),
         ]);
+    }
+
+    /**
+     * How many conversations of the filtered list fall in each category.
+     *
+     * @param  Builder<Conversation>  $query
+     * @return list<array{key: string, label: string, count: int}>
+     */
+    private function categoryCounts(Builder $query): array
+    {
+        $labels = Categories::labels();
+        $counts = array_fill_keys(array_keys($labels), 0);
+
+        $rows = (clone $query)->reorder()->toBase()
+            ->selectRaw('agent_category as category, count(*) as total')
+            ->groupBy('agent_category')
+            ->get();
+        foreach ($rows as $row) {
+            $key = Categories::isValid($row->category) ? $row->category : Categories::OTHER;
+            $counts[$key] += (int) $row->total;
+        }
+
+        $categories = [];
+        foreach ($labels as $key => $label) {
+            $categories[] = ['key' => $key, 'label' => $label, 'count' => $counts[$key]];
+        }
+
+        return $categories;
     }
 
     public function show(Request $request, Conversation $conversation): Response

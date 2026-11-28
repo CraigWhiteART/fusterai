@@ -6,8 +6,7 @@ use App\Domains\Agent\Models\AgentRun;
 use App\Domains\Agent\Pipeline\HandoverReasons;
 use App\Domains\Conversation\Models\Conversation;
 use App\Enums\ConversationStatus;
-use App\Enums\ThreadType;
-use Illuminate\Support\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Where the agent got to, per conversation of an inbox page: "draft_ready"
@@ -17,12 +16,62 @@ use Illuminate\Support\Carbon;
  * It reads the latest completed live run for the conversation's latest
  * customer message, in one query for the whole page. No marker once a
  * person replied after that run, or the draft was used or dismissed.
+ * The rule itself is SQL (STATE_SQL) so the inbox can also filter by it.
  */
 final class InboxMarkers
 {
     public const DRAFT_READY = 'draft_ready';
 
     public const NEEDS_YOU = 'needs_you';
+
+    /** Conversation statuses that can carry a marker. */
+    private const STATUSES = [ConversationStatus::Open, ConversationStatus::Pending];
+
+    /**
+     * The one definition of a marker, as SQL over a row of `agent_runs`:
+     * 'draft_ready', 'needs_you' or null. The row badges (for()) and the
+     * inbox "Draft ready" filter (whereDraftReady()) both read it, so they
+     * cannot disagree.
+     */
+    private const STATE_SQL = <<<'SQL'
+case
+    -- a person has replied since the run finished
+    when (select max(t.created_at) from threads t where t.conversation_id = agent_runs.conversation_id and t.type = 'message' and t.customer_id is null)
+        > coalesce(agent_runs.completed_at, agent_runs.created_at) then null
+    when agent_runs.decision = 'handover' then 'needs_you'
+    -- sent automatically, or the draft was used or dismissed
+    when agent_runs.decision is distinct from 'draft' then null
+    when (select s.accepted from ai_suggestions s where s.id = agent_runs.ai_suggestion_id) is not null then null
+    when coalesce((agent_runs.auto_send -> 'blockers') @> '["needs_human"]'::jsonb, false) then 'needs_you'
+    else 'draft_ready'
+end
+SQL;
+
+    /**
+     * SQL for the id of the run that decides a conversation's marker: the
+     * newest completed live run for its latest customer message.
+     *
+     * @param  string  $conversationId  SQL expression for the conversation id
+     */
+    private static function decidingRunSql(string $conversationId): string
+    {
+        return <<<SQL
+(select max(r.id) from agent_runs r
+    where r.conversation_id = {$conversationId} and r.purpose = 'live' and r.status = 'completed'
+    and r.customer_thread_id = (select t.id from threads t where t.conversation_id = {$conversationId} and t.type = 'message' and t.customer_id is not null order by coalesce(t.sent_at, t.created_at) desc, t.id desc limit 1))
+SQL;
+    }
+
+    /**
+     * Keep only conversations whose marker is "draft ready".
+     *
+     * @param  Builder<Conversation>  $query
+     */
+    public static function whereDraftReady(Builder $query): void
+    {
+        $query->whereIn('conversations.status', array_map(fn (ConversationStatus $status) => $status->value, self::STATUSES))
+            ->whereRaw('exists (select 1 from agent_runs where agent_runs.id = '.self::decidingRunSql('conversations.id').' and ('.self::STATE_SQL.") = '".self::DRAFT_READY."')");
+    }
 
     /**
      * @param  iterable<int, Conversation>  $conversations
@@ -32,7 +81,7 @@ final class InboxMarkers
     {
         $ids = [];
         foreach ($conversations as $conversation) {
-            if (in_array($conversation->status, [ConversationStatus::Open, ConversationStatus::Pending], true)) {
+            if (in_array($conversation->status, self::STATUSES, true)) {
                 $ids[] = $conversation->id;
             }
         }
@@ -40,49 +89,32 @@ final class InboxMarkers
             return [];
         }
 
-        $message = ThreadType::Message->value;
         $runs = AgentRun::query()
             ->whereIn('conversation_id', $ids)
-            ->where('purpose', AgentRun::PURPOSE_LIVE)
-            ->where('status', AgentRun::STATUS_COMPLETED)
-            ->whereRaw('customer_thread_id = (select t.id from threads t where t.conversation_id = agent_runs.conversation_id and t.type = ? and t.customer_id is not null order by coalesce(t.sent_at, t.created_at) desc, t.id desc limit 1)', [$message])
-            ->select(['id', 'conversation_id', 'decision', 'handover_reason', 'auto_send', 'created_at', 'completed_at'])
-            ->selectRaw('(select max(t.created_at) from threads t where t.conversation_id = agent_runs.conversation_id and t.type = ? and t.customer_id is null) as last_staff_at', [$message])
-            ->selectRaw('(select s.accepted from ai_suggestions s where s.id = agent_runs.ai_suggestion_id) as suggestion_accepted')
-            ->orderByDesc('id')
+            ->whereRaw('agent_runs.id = '.self::decidingRunSql('agent_runs.conversation_id'))
+            ->select(['id', 'conversation_id', 'decision', 'handover_reason'])
+            ->selectRaw('('.self::STATE_SQL.') as marker_state')
             ->get();
 
         $markers = [];
         foreach ($runs as $run) {
-            $conversationId = (int) $run->conversation_id;
-            if (array_key_exists($conversationId, $markers)) {
-                continue; // an older run for the same message
+            $state = $run->getAttribute('marker_state');
+            if ($state === self::DRAFT_READY) {
+                $markers[(int) $run->conversation_id] = ['state' => self::DRAFT_READY, 'label' => null];
+            } elseif ($state === self::NEEDS_YOU) {
+                $markers[(int) $run->conversation_id] = ['state' => self::NEEDS_YOU, 'label' => self::needsYouLabel($run)];
             }
-            $markers[$conversationId] = self::marker($run);
         }
 
-        return array_filter($markers);
+        return $markers;
     }
 
-    /** @return array{state: string, label: string|null}|null */
-    private static function marker(AgentRun $run): ?array
+    private static function needsYouLabel(AgentRun $run): ?string
     {
-        $finished = $run->completed_at ?? $run->created_at;
-        $lastStaffAt = $run->getAttribute('last_staff_at');
-        if ($lastStaffAt !== null && $finished !== null && Carbon::parse($lastStaffAt)->gt($finished)) {
-            return null; // a person has replied since
+        if ($run->decision !== 'handover') {
+            return 'the draft has a note about something you need to decide or do';
         }
 
-        if ($run->decision === 'handover') {
-            return ['state' => self::NEEDS_YOU, 'label' => $run->handover_reason !== null ? HandoverReasons::label($run->handover_reason) : null];
-        }
-        if ($run->decision !== 'draft' || $run->getAttribute('suggestion_accepted') !== null) {
-            return null; // sent automatically, or the draft was used or dismissed
-        }
-        if (in_array('needs_human', (array) ($run->auto_send['blockers'] ?? []), true)) {
-            return ['state' => self::NEEDS_YOU, 'label' => 'the draft has a note about something you need to decide or do'];
-        }
-
-        return ['state' => self::DRAFT_READY, 'label' => null];
+        return $run->handover_reason !== null ? HandoverReasons::label($run->handover_reason) : null;
     }
 }

@@ -37,6 +37,8 @@ export interface ConversationViewProps {
     listProps?: string[];
     /** Called after "mark unread" to leave the conversation. */
     onLeave: () => void;
+    /** Split inbox only: called after a reply is sent or the conversation is closed, to move on to the next one. */
+    onHandled?: () => void;
 }
 
 const INSPECTOR_KEY = 'conversation.inspector.open';
@@ -65,6 +67,7 @@ export default function ConversationView({
     detailProp,
     listProps = [],
     onLeave,
+    onHandled,
 }: ConversationViewProps) {
     const { auth, aiConfigured = false } = usePage<PageProps & { aiConfigured?: boolean }>().props;
     const { conversation, isFollowing, folderIds } = detail;
@@ -189,7 +192,7 @@ export default function ConversationView({
     const base = `/conversations/${id}`;
 
     function updateStatus(status: string) {
-        router.patch(`${base}/status`, { status }, visit);
+        router.patch(`${base}/status`, { status }, { ...visit, onSuccess: status === 'closed' ? onHandled : undefined });
     }
     function updatePriority(priority: string) {
         router.patch(`${base}/priority`, { priority }, visit);
@@ -330,6 +333,9 @@ export default function ConversationView({
                             aiBusy={ai.generating}
                             onRequestAi={ai.request}
                             sendWarning={sendWarning}
+                            onSent={(type) => {
+                                if (type === 'message') onHandled?.();
+                            }}
                             before={<SlotRenderer name="conversation.reply.before" props={{ conversation, commerceAssist }} />}
                         />
                     )}

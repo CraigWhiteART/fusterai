@@ -25,6 +25,7 @@ use Spatie\Activitylog\Traits\LogsActivity;
 
 /**
  * @property bool $is_unread
+ * @property string|null $agent_category
  * @property-read Mailbox|null $mailbox
  * @property-read Customer|null $customer
  * @property-read User|null $assignedUser

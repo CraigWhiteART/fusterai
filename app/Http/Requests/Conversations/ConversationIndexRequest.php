@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Conversations;
 
+use App\Domains\Agent\Support\Categories;
 use App\Enums\ConversationPriority;
 use App\Enums\ConversationStatus;
 use Illuminate\Foundation\Http\FormRequest;
@@ -27,6 +28,8 @@ class ConversationIndexRequest extends FormRequest
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'starred' => ['nullable', 'boolean'],
+            'category' => ['nullable', Rule::in(Categories::keys())],
+            'draft_ready' => ['nullable', 'boolean'],
         ];
     }
 }

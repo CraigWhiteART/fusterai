@@ -12,6 +12,7 @@ use App\Domains\Agent\Models\AgentSetting;
 use App\Domains\Agent\Services\AgentBootstrapper;
 use App\Domains\Agent\Services\ExampleSearch;
 use App\Domains\Agent\Services\KnowledgeSearch;
+use App\Domains\Agent\Support\Categories;
 use App\Domains\Agent\Tools\HandoverTool;
 use App\Domains\Agent\Tools\LookupOrderTool;
 use App\Domains\Agent\Tools\LookupTrackingTool;
@@ -33,7 +34,7 @@ use Throwable;
  *
  *   1. preflight      kill switch, mode, auto-reply guard, idempotency key
  *   2. transcript     full history, chronological, within a token budget
- *   3. triage         `triage` role, structured: language, sentiment, risk, playbook
+ *   3. triage         `triage` role, structured: language, sentiment, risk, playbook, category
  *   4. evidence       Shopify order + carrier tracking into an id'd ledger
  *   5. writer         `writer` role, bounded tool loop ending in submit_reply
  *   6. validation     deterministic checks, then `validator` role; fail closed; one rewrite
@@ -263,6 +264,11 @@ class AgentPipeline
         // 3. Triage
         $triage = $this->triage($input, $instructions, $untrusted, $rendered['text'], $meter, $trace);
         $playbook = $instructions->playbook($triage['playbook']);
+        // The inbox category: known as soon as triage answers, so it is kept
+        // even when a later step fails. Live runs only.
+        if ($input->isLive() && $input->conversation !== null && $triage['category'] !== null) {
+            $this->effects->categorise($run, $input->conversation, $triage['category']);
+        }
 
         // 4. Evidence
         $ledger = $this->evidence->collect($input);
@@ -350,7 +356,7 @@ class AgentPipeline
 
     /**
      * @param  array<string, mixed>  $trace
-     * @return array{language: string, sentiment: string, risk_flags: list<string>, playbook: string|null, confidence: float|null, reason: string, error: string|null, heuristics: list<string>}
+     * @return array{language: string, sentiment: string, risk_flags: list<string>, playbook: string|null, category: string|null, confidence: float|null, reason: string, error: string|null, heuristics: list<string>}
      */
     private function triage(PipelineInput $input, InstructionSet $instructions, UntrustedData $untrusted, string $transcript, UsageMeter $meter, array &$trace): array
     {
@@ -364,6 +370,8 @@ class AgentPipeline
             'sentiment' => 'unknown',
             'risk_flags' => $heuristics !== [] ? ['prompt_injection'] : [],
             'playbook' => null,
+            // Null until the triage model has answered (no playbooks, or an error).
+            'category' => null,
             'confidence' => null,
             'reason' => '',
             'error' => null,
@@ -397,6 +405,7 @@ class AgentPipeline
         }
 
         $slug = (string) ($data['playbook'] ?? 'none');
+        $chosen = isset($catalogue[$slug]) ? $slug : null;
         $flags = array_values(array_intersect((array) ($data['risk_flags'] ?? []), TriageAgent::RISK_FLAGS));
 
         return [
@@ -404,7 +413,9 @@ class AgentPipeline
             'language' => (string) ($data['language'] ?? 'unknown'),
             'sentiment' => (string) ($data['sentiment'] ?? 'unknown'),
             'risk_flags' => array_values(array_unique([...$result['risk_flags'], ...$flags])),
-            'playbook' => isset($catalogue[$slug]) ? $slug : null,
+            'playbook' => $chosen,
+            // The chosen playbook's mapped category wins; the model's own answer counts without one.
+            'category' => Categories::resolve($chosen, $data['category'] ?? null),
             'confidence' => isset($data['confidence']) ? (float) $data['confidence'] : null,
             'reason' => mb_substr((string) ($data['reason'] ?? ''), 0, 500),
         ];

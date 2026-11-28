@@ -3,6 +3,7 @@
 namespace App\Domains\Agent\Agents;
 
 use App\Ai\Concerns\HasConfigurableProviderOptions;
+use App\Domains\Agent\Support\Categories;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Ai\Attributes\MaxTokens;
 use Laravel\Ai\Attributes\Model;
@@ -47,6 +48,8 @@ class TriageAgent implements Agent, HasProviderOptions, HasStructuredOutput
                 ->description('Every risk present; empty when none')->required(),
             'playbook' => $schema->string()->enum([...$this->slugs, 'none'])
                 ->description('The one playbook whose "when" description fits, or none')->required(),
+            'category' => $schema->string()->enum(Categories::keys())
+                ->description('What the email is about, whether or not a playbook fits')->required(),
             'confidence' => $schema->number()->description('0 to 1')->required(),
             'reason' => $schema->string()->description('One short sentence for the reviewer')->required(),
         ];

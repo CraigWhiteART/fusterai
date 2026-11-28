@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { CalendarIcon, ChevronDownIcon, MailboxIcon, XIcon } from 'lucide-react';
+import { CalendarIcon, ChevronDownIcon, MailboxIcon, SparklesIcon, XIcon } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/Components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import type { Mailbox, Tag } from '@/types';
@@ -16,11 +16,21 @@ export type InboxFilterValues = {
     date_to?: string;
     view?: string;
     starred?: string;
+    category?: string;
+    draft_ready?: string;
 };
+
+/** A category the AI agent sorts conversations into, with how many of the current list are in it. */
+export type InboxCategory = { key: string; label: string; count: number };
+
+const chip = 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-all whitespace-nowrap';
+const chipOn = 'border-primary/30 bg-primary/10 text-primary';
+const chipOff = 'border-border bg-background text-muted-foreground hover:text-foreground';
 
 interface Props {
     filters: InboxFilterValues;
     counts: Record<string, number>;
+    categories: InboxCategory[];
     isAgent: boolean;
     mailboxes: Pick<Mailbox, 'id' | 'name'>[];
     tags: Tag[];
@@ -29,8 +39,10 @@ interface Props {
     leading?: ReactNode;
 }
 
-/** Status tabs, assignment / mailbox / date filters and the active tag chip above the inbox list. */
-export default function InboxFilters({ filters, counts, isAgent, mailboxes, tags, go, leading }: Props) {
+/** Status tabs, assignment / mailbox / date filters, category chips and the active tag chip above the inbox list. */
+export default function InboxFilters({ filters, counts, categories, isAgent, mailboxes, tags, go, leading }: Props) {
+    const categoryTotal = categories.reduce((sum, category) => sum + category.count, 0);
+    const draftReady = filters.draft_ready === '1' || filters.draft_ready === 'true';
     const hasDate = !!(filters.date_from || filters.date_to);
     // The date range is rarely used: tucked behind a button, and always shown while it filters the list.
     const [dateOpen, setDateOpen] = useState(hasDate);
@@ -150,6 +162,43 @@ export default function InboxFilters({ filters, counts, isAgent, mailboxes, tags
                     )}
                 >
                     <CalendarIcon className="h-3 w-3" />
+                </button>
+            </div>
+
+            {/* Category chips (set by the AI agent) and the "Draft ready" toggle */}
+            <div className="px-3 py-2 border-b border-border shrink-0 flex flex-wrap items-center gap-1">
+                <button
+                    type="button"
+                    onClick={() => go({ category: undefined, page: undefined })}
+                    aria-pressed={!filters.category}
+                    className={cn(chip, !filters.category ? chipOn : chipOff)}
+                >
+                    All
+                    <span className="tabular-nums opacity-60">{categoryTotal}</span>
+                </button>
+                {categories
+                    .filter((category) => category.count > 0 || filters.category === category.key)
+                    .map((category) => (
+                        <button
+                            key={category.key}
+                            type="button"
+                            onClick={() => go({ category: filters.category === category.key ? undefined : category.key, page: undefined })}
+                            aria-pressed={filters.category === category.key}
+                            className={cn(chip, filters.category === category.key ? chipOn : chipOff)}
+                        >
+                            {category.label}
+                            <span className="tabular-nums opacity-60">{category.count}</span>
+                        </button>
+                    ))}
+                <button
+                    type="button"
+                    onClick={() => go({ draft_ready: draftReady ? undefined : '1', page: undefined })}
+                    aria-pressed={draftReady}
+                    title="Only conversations where the AI agent has a reply ready for you to check and send"
+                    className={cn(chip, 'ml-auto', draftReady ? 'border-info/30 bg-info/10 text-info' : chipOff)}
+                >
+                    <SparklesIcon className="h-2.5 w-2.5" />
+                    Draft ready
                 </button>
             </div>
 
